@@ -42,14 +42,14 @@ def signal_matrix(dates: pd.DatetimeIndex):
             + s["geography_id"].fillna("").astype(str) + "|" + s["entity_key"].fillna(""))
     s["feature_key"] = keys.map(safe_name)
     s = s.sort_values(["feature_key", "period_end"]).drop_duplicates(["feature_key", "period_end"], keep="last")
-    wide = pd.DataFrame(index=dates)
+    columns = {}
     for key, group in s.groupby("feature_key", sort=True):
         series = group.set_index("period_end")["value"].sort_index()
         series = series[~series.index.duplicated(keep="last")]
-        wide[key] = series.reindex(dates, method="ffill")
+        columns[key] = series.reindex(dates, method="ffill")
     # Missing before the first observed source period means no signal was
     # available, represented explicitly as zero for tree-model compatibility.
-    wide = wide.fillna(0.0)
+    wide = pd.DataFrame(columns, index=dates).fillna(0.0)
     return wide, s
 
 

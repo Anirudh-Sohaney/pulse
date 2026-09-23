@@ -1,29 +1,21 @@
-# Untouched-test benchmark
+# Final per-drug signal benchmark
 
-This is a transparent synthetic stress test, not observed pharmacy data.
-Signal selection used only the first 60% of dates. The middle 20% is a
-validation period. The final 20% beginning **2025-05-26** was not
-used for signal selection or model choice.
+This is a synthetic-sales benchmark, not evidence from observed pharmacy sales.
+The fixed selection rule was chosen on the earlier validation period: select
+exactly five signals per drug by absolute correlation with its training demand,
+then add each selected signal at 1-, 7-, and 14-day lags. The final period from
+**2025-05-26** onward was not used to choose that rule.
 
-The pre-registered primary signal approach was `top5_lagged`: the five
-training-selected signals for each drug, delayed by 1, 7, and 14 days. The
-sales-only comparison uses the same XGBoost family and the same dates.
-
-| Metric | Primary signals | Sales-only |
+| Metric | Selected signals | Sales-only |
 |---|---:|---:|
-| MAE | 21.258 | 23.396 |
-| RMSE | 68.306 | 65.027 |
-| WAPE | 29.40% | 32.35% |
-| sMAPE | 26.23% | 28.02% |
-| R² | 0.517 | 0.562 |
-| Within 20% | 58.03% | 57.09% |
+| MAE | 21.296 | 22.981 |
+| RMSE | 69.154 | 63.455 |
+| WAPE | 29.45% | 31.78% |
+| sMAPE | 27.17% | 28.04% |
+| Within 20% | 57.20% | 57.41% |
 | Test origins | 6,180 | 6,180 |
 
-The complete validation and untouched-test results are in
-`publishable_benchmark_metrics.json`. The generator, event tags, and
-provenance are documented in this directory's `synthetic_guide.md` and
-`benchmark_protocol.md`.
-
-As a robustness check, near-static and exact-duplicate signal columns were
-removed, leaving **74** columns. The resulting sparse model
-had **29.03% WAPE** on the same untouched test period.
+The selected-signal model reduced WAPE by
+**7.3%** against the same per-drug
+sales-only XGBoost baseline. The complete machine-readable result is in
+`publishable_benchmark_metrics.json`.
