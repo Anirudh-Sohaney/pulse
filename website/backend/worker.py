@@ -19,7 +19,19 @@ from .refresh_public import (refresh_gdelt_news, refresh_fda_drugs_news,
                              refresh_fda_medwatch_news, refresh_fda_recalls_news,
                              refresh_fda_press_news)
 from .refresh_news_model import refresh_news_model
-from .refresh_combined_model import refresh_combined_model
+from .refresh_fluview import refresh_fluview
+from .refresh_nndss import refresh_nndss
+from .refresh_wastewater import refresh_wastewater
+from .refresh_enforcement import refresh_enforcement
+from .refresh_shortages import refresh_shortages
+from .refresh_bls import refresh_bls
+from .refresh_medicaid import refresh_medicaid
+from .refresh_cms_geo import refresh_cms_geo
+from .refresh_nadac import refresh_nadac
+from .refresh_sdud import refresh_sdud
+from .refresh_cms_partd_source import refresh_cms_partd_source
+from .refresh_hhs_ndc_release import refresh_hhs_ndc_release
+from .refresh_demand_baseline import refresh_demand_baseline
 from .signal_store import connect, initialize, record_worker_heartbeat
 
 
@@ -44,7 +56,19 @@ REFRESH_TASKS: tuple[tuple[Callable[[], dict], tuple[str, ...]], ...] = (
     (refresh_fda_recalls_news, ("fda_recalls_rss",)),
     (refresh_fda_press_news, ("fda_press_rss",)),
     (refresh_news_model, ("article_text_20_signal_shadow_v1",)),
-    (refresh_combined_model, ("combined_demand_signals",)),
+    (refresh_fluview, ("delphi_fluview_ilinet_v5",)),
+    (refresh_nndss, ("cdc_nndss_weekly_v1",)),
+    (refresh_wastewater, ("cdc_wval_reporting_site_mean_v1",)),
+    (refresh_enforcement, ("openfda_drug_enforcement",)),
+    (refresh_shortages, ("openfda_shortages",)),
+    (refresh_bls, ("bls_public_api_v1",)),
+    (refresh_medicaid, ("medicaid_state_performance_api",)),
+    (refresh_cms_geo, ("cms_geographic_variation_api",)),
+    (refresh_nadac, ("medicaid_nadac_2026_api",)),
+    (refresh_sdud, ("medicaid_sdud_arkansas",)),
+    (refresh_cms_partd_source, ("cms_partd_catalog_source",)),
+    (refresh_hhs_ndc_release, ("hhs_ndc_release_catalog",)),
+    (refresh_demand_baseline, ("cms_partd_two_year_persistence_v2",)),
 )
 
 
@@ -90,7 +114,8 @@ def due_tasks(now: datetime | None = None) -> list[Callable[[], dict]]:
     """Catch up missed jobs and retry failures within each source's safe budget."""
     initialize()
     current = now or datetime.now(timezone.utc)
-    cutoff = most_recent_schedule(current).isoformat()
+    current_schedule = most_recent_schedule(current)
+    cutoff = current_schedule.isoformat()
     first_this_month = current.date().replace(day=1)
     first_previous_month = (first_this_month - timedelta(days=1)).replace(day=1)
     with connect() as db:
@@ -124,14 +149,22 @@ def due_tasks(now: datetime | None = None) -> list[Callable[[], dict]]:
             and latest_news_evidence is not None
             and latest_news_evidence > latest_success_at.get(names[0], datetime.min.replace(
                 tzinfo=timezone.utc)))
-        if all_sources_succeeded and not news_evidence_changed:
-            continue
+        source_newer_than_baseline = (refresh is refresh_demand_baseline
+            and last_success is not None
+            and successful_at.get("cms_partd_catalog_source", last_success) > last_success)
         latest_failure = max((failed_at[name] for name in names if name in failed_at
                               and (name not in latest_success_at
                                    or failed_at[name][0] > latest_success_at[name])),
                              key=lambda item: item[0], default=None)
+        if (all_sources_succeeded and latest_failure is None
+                and not news_evidence_changed and not source_newer_than_baseline):
+            continue
         if latest_failure is not None:
             failed_time, failure_message = latest_failure
+            # An unregistered BLS v1 caller has a limited daily request budget.
+            # A partial refresh may have consumed it, so retry on the next schedule.
+            if refresh is refresh_bls and failed_time.date() >= current.date():
+                continue
             minimum_retry_delay = RETRY_DELAY
             if TRANSIENT_DNS_PATTERN.search(failure_message):
                 minimum_retry_delay = TRANSIENT_DNS_RETRY_DELAY

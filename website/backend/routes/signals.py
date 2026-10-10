@@ -39,17 +39,24 @@ def _validate_dates(query: SignalQuery) -> tuple[date | None, date | None]:
 
 
 @router.get("/catalog")
-def catalog(search: str = Query("", max_length=120), limit: int = Query(1500, ge=1, le=1500),
+def catalog(search: str = Query("", max_length=120),
+            origin: str = Query("", max_length=64),
+            limit: int = Query(1500, ge=1, le=1500),
             offset: int = Query(0, ge=0)):
     """List stable signal IDs, identity, units, source, and last observation."""
-    rows = signal_store.list_signals(search=search.strip(), limit=limit, offset=offset)
-    return {"signals": rows, "count": len(rows), "offset": offset,
+    normalized_search = search.strip()
+    normalized_origin = origin.strip()
+    rows = signal_store.list_signals(search=normalized_search, origin=normalized_origin,
+                                     limit=limit, offset=offset)
+    total = signal_store.count_signals(search=normalized_search, origin=normalized_origin)
+    return {"signals": rows, "count": len(rows), "filtered_total": total,
+            "offset": offset,
             "note": "State values are ordinal categories, not medication units or purchase quantities."}
 
 
 @router.get("/catalog/seed")
 def seed_catalog():
-    """Return exactly the 1,312 stable definitions in the checked-in seed manifest."""
+    """Return exactly the 1,250 stable definitions in the checked-in seed manifest."""
     rows = signal_store.seed_definitions()
     return {"signals": rows, "count": len(rows),
             "source": "checked_in_seed_manifest",
@@ -110,7 +117,7 @@ def coverage():
 
 @router.get("/coverage/summary")
 def coverage_summary():
-    """Return usable-value coverage for the exact 1,312-ID seed catalog."""
+    """Return usable-value coverage for the exact 1,250-ID seed catalog."""
     return signal_store.seed_coverage_summary()
 
 
@@ -134,7 +141,7 @@ def recent_public_signals(days: int = Query(3, ge=1, le=7),
                           limit: int = Query(12, ge=1, le=20)):
     rows = signal_store.recent_public_signals(days=days, limit=limit)
     return {"signals": rows, "count": len(rows), "window_days": days,
-            "note": "These are recent source releases and transparent source-derived surveillance measures with unresolved same-revision conflicts omitted. Their observation periods may be older than the recording date; they are context, not drug-demand forecasts. Wastewater values are unweighted reporting-site means, not official geographic medians; inspect their contributing-site counts."}
+            "note": "These are recently captured source observations and transparent source-derived surveillance measures with unresolved same-revision conflicts omitted. Their observation periods may be older than the recording date, and a recent capture does not prove a recent upstream release. They are context, not drug-demand forecasts. Wastewater values are unweighted reporting-site means, not official geographic medians; inspect their contributing-site counts."}
 
 
 @router.get("/sources/shortages/recent")

@@ -18,6 +18,26 @@ HISTORY_FIXTURE = Path(__file__).resolve().parent / "fixtures" / "signals_2023_2
 NEWS_BRIDGE = Path(__file__).resolve().parents[1] / "catalog" / "news_only_catalog_features.csv.gz"
 
 
+def _insert_conflicting_observation(day: str) -> str:
+    definition = {"signal_origin": "observed", "signal_id": "test_source_observation",
+                  "cadence": "monthly", "geography_level": "state",
+                  "geography_id": "AR", "entity_key": ""}
+    uid = signal_store.signal_uid(definition)
+    with signal_store.connect() as db:
+        db.execute("""INSERT INTO signal_definitions
+            (id, signal_origin, signal_id, cadence, geography_level,
+             geography_id, entity_key) VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (uid, *definition.values()))
+        for index, value in enumerate((12.0, 13.0)):
+            db.execute("""INSERT INTO signal_records
+                (row_hash, signal_uid, signal_date, observation_date, value,
+                 source_timestamp, ingested_at, source_kind)
+                VALUES (?, ?, ?, ?, ?, '2026-10-01T12:00:00+00:00',
+                        '2026-10-01T13:00:00+00:00', 'test_observed_source')""",
+                (f"test-conflict-{day}-{index}", uid, day, day, value))
+    return uid
+
+
 def test_verified_news_bridge_backfills_only_missing_history(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "DATA_PATH", str(tmp_path))
     import_catalog(HISTORY_FIXTURE)
@@ -74,18 +94,18 @@ def test_definitions_only_seed_is_not_ready_without_historical_value_file(tmp_pa
     monkeypatch.setattr(settings, "DATA_PATH", str(tmp_path))
     manifest = Path(__file__).resolve().parents[1] / "catalog" / "signal_definitions.json"
     first = import_definitions(manifest)
-    assert first == {"definitions_seen": 1312, "definitions_inserted": 1312}
+    assert first == {"definitions_seen": 1250, "definitions_inserted": 1250}
     assert import_definitions(manifest)["definitions_inserted"] == 0
     client = TestClient(create_app())
     ready = client.get("/ready")
     assert ready.status_code == 503
     assert ready.json()["historical_catalog_records"] == 0
     catalog = client.get("/api/v1/signals/catalog").json()["signals"]
-    assert len(catalog) == 1312
+    assert len(catalog) == 1250
     latest = client.post("/api/v1/signals/latest", json={
         "ids": [row["id"] for row in catalog]}).json()
     assert latest["values"] == []
-    assert len(latest["missing_ids"]) == 1312
+    assert len(latest["missing_ids"]) == 1250
     assert latest["unusable_recorded_values"] == []
 
 
@@ -108,13 +128,13 @@ def test_bundled_history_matches_tested_source(tmp_path, monkeypatch, capsys):
     assert startup.DEFAULT_HISTORY.read_bytes() == HISTORY_FIXTURE.read_bytes()
     startup.main()
     result = json.loads(capsys.readouterr().out)
-    assert result["history"]["observations_seen"] == 6484
-    assert result["history"]["observations_inserted"] == 4097
-    assert result["database"]["definitions"] == 1312
+    assert result["history"]["observations_seen"] == 1950
+    assert result["history"]["observations_inserted"] == 1950
+    assert result["database"]["definitions"] == 1250
     ready = TestClient(create_app()).get("/ready")
     assert ready.status_code == 200
-    assert ready.json()["historical_catalog_records"] == 4097
-    assert audit(tmp_path / "signals.sqlite3")["records"] == 5317
+    assert ready.json()["historical_catalog_records"] == 1950
+    assert audit(tmp_path / "signals.sqlite3")["records"] == 3170
     with signal_store.connect() as db:
         source_row = db.execute("""SELECT row_hash, source_url FROM signal_records
             WHERE source_kind='historical_catalog' AND source_url!='' LIMIT 1""").fetchone()
@@ -142,12 +162,20 @@ def test_bundled_history_matches_tested_source(tmp_path, monkeypatch, capsys):
 def test_catalog_and_observation_queries_do_not_impute_missing_dates(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "DATA_PATH", str(tmp_path))
     imported = import_catalog(HISTORY_FIXTURE)
-    assert imported["definitions"] == 1312
+    assert imported["definitions"] == 1250
     assert imported["rejected_rows"] == 0
     client = TestClient(create_app())
     catalog = client.get("/api/v1/signals/catalog").json()["signals"]
-    assert len(catalog) == 1312
-    assert len({row["id"] for row in catalog}) == 1312
+    assert len(catalog) == 1250
+    assert len({row["id"] for row in catalog}) == 1250
+    news_page = client.get("/api/v1/signals/catalog", params={
+        "origin": "model_news_output", "limit": 10, "offset": 10}).json()
+    assert news_page["filtered_total"] == 20
+    assert news_page["count"] == 10
+    assert all(row["signal_origin"] == "model_news_output"
+               for row in news_page["signals"])
+    assert client.get("/api/v1/signals/catalog", params={
+        "origin": "model_external_state_feature"}).json()["filtered_total"] == 0
     percent_matches = client.get("/api/v1/signals/catalog", params={"search": "%"}).json()["signals"]
     assert 0 < len(percent_matches) < len(catalog)
     assert all("%" in row["signal_id"] or "%" in row["entity_key"]
@@ -162,10 +190,13 @@ def test_catalog_and_observation_queries_do_not_impute_missing_dates(tmp_path, m
     assert found | missing == set(all_ids)
     assert client.post("/api/v1/signals/history", json={
         "ids": all_ids[:101]}).status_code == 422
-    uid = next(row["id"] for row in catalog if row["signal_id"] == "dual_eligible_rate")
+    uid = next(row["id"] for row in catalog if row["signal_id"] ==
+               "arkansas_atc_demand_state::A02")
     latest = client.post("/api/v1/signals/latest", json={"ids": [uid]}).json()
-    assert latest["values"][0]["id"] == uid
-    assert latest["values"][0]["source_timestamp"]
+    assert latest["values"] == []
+    assert latest["unusable_recorded_values"][0]["id"] == uid
+    assert latest["unusable_recorded_values"][0]["source_timestamp"] == ""
+    assert latest["unusable_recorded_values"][0]["source_kind"] == "historical_catalog"
     absent = client.post("/api/v1/signals/history", json={
         "ids": [uid], "date": "2024-06-01",
     }).json()
@@ -188,8 +219,7 @@ def test_conflicting_source_values_are_marked_ambiguous(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "DATA_PATH", str(tmp_path))
     import_catalog(HISTORY_FIXTURE)
     client = TestClient(create_app())
-    catalog = client.get("/api/v1/signals/catalog", params={"search": "adult_medicaid_enrollment"}).json()["signals"]
-    uid = next(row["id"] for row in catalog if row["signal_id"] == "adult_medicaid_enrollment")
+    uid = _insert_conflicting_observation("2024-01-31")
     history = client.post("/api/v1/signals/history", json={
         "ids": [uid], "date": "2024-01-31",
     }).json()["values"]
@@ -197,27 +227,15 @@ def test_conflicting_source_values_are_marked_ambiguous(tmp_path, monkeypatch):
     assert all(row["ambiguous"] for row in history)
     assert len({row["value"] for row in history}) > 1
     coverage = client.get("/api/v1/signals/coverage").json()
-    collisions = [row for row in coverage["signals"]
-                  if row["gap_status"] == "identity_dimensions_collapsed"]
-    assert len(collisions) == 6
+    source_row = next(row for row in coverage["signals"] if row["id"] == uid)
+    assert source_row["gap_status"] == "live_source_observation_recorded"
 
 
 def test_latest_with_conflicting_source_revision_is_not_usable(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "DATA_PATH", str(tmp_path))
     import_catalog(HISTORY_FIXTURE)
     client = TestClient(create_app())
-    uid = next(row["id"] for row in client.get("/api/v1/signals/catalog",
-               params={"search": "adult_medicaid_enrollment"}).json()["signals"]
-               if row["signal_id"] == "adult_medicaid_enrollment")
-    with signal_store.connect() as db:
-        for index, value in enumerate((12.0, 13.0)):
-            db.execute("""INSERT INTO signal_records
-                (row_hash, signal_uid, signal_date, observation_date, value,
-                 source_timestamp, ingested_at, source_kind)
-                VALUES (?, ?, '2026-09-30', '2026-09-30', ?,
-                        '2026-10-01T12:00:00+00:00',
-                        '2026-10-01T13:00:00+00:00', 'medicaid_state_performance_api')""",
-                (f"test-conflict-{index}", uid, value))
+    uid = _insert_conflicting_observation("2026-09-30")
     latest = client.post("/api/v1/signals/latest", json={"ids": [uid]}).json()
     assert latest["values"] == []
     assert latest["missing_ids"] == [uid]
@@ -228,28 +246,16 @@ def test_latest_with_conflicting_source_revision_is_not_usable(tmp_path, monkeyp
                latest["latest_recorded_values"])
 
 
-def test_collapsed_dimension_ids_are_history_only(tmp_path, monkeypatch):
+def test_retired_external_ids_are_not_imported(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "DATA_PATH", str(tmp_path))
     import_catalog(HISTORY_FIXTURE)
     client = TestClient(create_app())
     catalog = client.get("/api/v1/signals/catalog").json()["signals"]
-    collapsed = [row for row in catalog
-                 if row["signal_id"] in signal_store.COLLAPSED_DIMENSION_SIGNALS]
-    assert len(collapsed) == 6
-    ids = [row["id"] for row in collapsed]
-    latest = client.post("/api/v1/signals/latest", json={"ids": ids}).json()
-    assert latest["values"] == []
-    assert set(latest["missing_ids"]) == set(ids)
-    assert all(row["reason"] == "identity_dimensions_collapsed"
-               for row in latest["missing_details"])
-    assert {row["id"] for row in latest["unusable_recorded_values"]} == set(ids)
-    assert all(row["usable"] is False for row in latest["unusable_recorded_values"])
-    for uid in ids:
-        history = client.post("/api/v1/signals/history", json={"ids": [uid]}).json()
-        assert history["values"]
-        assert all(row["usable"] is False and
-                   row["unusable_reason"] == "identity_dimensions_collapsed"
-                   for row in history["values"])
+    assert len(catalog) == 1250
+    assert {row["id"] for row in catalog} == {
+        row["id"] for row in signal_store.seed_definitions()}
+    assert not {"adult_medicaid_enrollment", "dual_eligible_rate"}.intersection(
+        row["signal_id"] for row in catalog)
 
 
 def test_legacy_zero_filled_atc_output_is_not_a_latest_usable_value(tmp_path, monkeypatch):

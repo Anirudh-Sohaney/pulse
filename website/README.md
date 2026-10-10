@@ -1,67 +1,76 @@
-# Pulse — Pharmacy Demand and Replenishment Demo
+# PULSE — Pharmacy Demand and Replenishment Demo
 
-A per-account demonstration of pharmaceutical demand forecasting and inventory replenishment planning.
+PULSE serves dated public-health and pharmaceutical source context alongside an
+evaluated Arkansas Medicare Part D demand-state baseline. Its frontend also
+supports private, browser-based pharmacy demand planning. This is a research
+system, not an operational purchasing or clinical decision system.
 
-> **Development status:** Scientific proof-of-concept. The system generates demand signals using historical data and live news feeds. It is not an operational pharmacy system.
+## What the live service runs
 
-The application serves predictive signals driven by an integrated `ProductionModel`. The system consists of a FastAPI backend that runs a 24/7 background worker. The worker periodically fetches live news data, combines it with historical data, and generates predictive signals for 1300+ CMS Part D drugs and 18 ATC classes.
+The FastAPI service imports a fixed 1,250-ID seed catalog and exposes dated
+values through `/api/v1/signals/catalog`, `/latest`, `/history`, `/freshness`,
+and source-specific routes. The source worker checks FDA news and shortages,
+BLS, Medicaid, CMS, FluView, NNDSS, and wastewater feeds. Source adapters and
+evaluated newer-drug outputs can add stable IDs beyond the seed catalog.
 
-## Repository Structure
+`/api/v1/signals/demand/drugs` serves the separately evaluated two-year
+persistence projection of **relative** Arkansas Medicare Part D claim states.
+Its response includes the source year, target year, observed source claims,
+method, and chronological evaluation. A state is neither a dispensing count
+nor units to order.
 
-```text
-website/
-├── backend/              # API/server (Python) and background worker
-├── frontend/             # Web UI (React/TypeScript)
-├── data/                 # Local development data
-├── scripts/              # Utility scripts
-├── requirements.txt      # Python dependencies
-└── README.md
-```
+The 20 archived news-model IDs have a local article-text Ridge shadow runner.
+Its current estimates are recorded with article provenance but remain excluded
+from usable latest values. The 18 archived ATC outputs are also excluded from
+usable latest values. The older `model/prod_pipeline.py` is a research fit that
+fails closed for live output. The saved forecast artifact in `../model/` has
+`operational_ready: false`; the website worker does not load it. The original
+FLAN-T5 article-to-20-signal runner and checkpoint are not in this checkout.
 
-## Quick Start
+## Run locally
 
-### 1. Start the API and Worker
+From `website/`, install `requirements.txt` in a virtual environment, then:
 
-Set up a virtual environment and install backend dependencies:
 ```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-```
-
-Run the backend API:
-```bash
+python -m scripts.import_signal_catalog
+python -m scripts.audit_signal_store
 python -m backend.main
 ```
-The API listens on `http://localhost:8000`.
 
-Run the background worker in a separate terminal:
+Run `python -m backend.worker` in another terminal for scheduled source checks
+at 16:00 UTC, or `python -m backend.worker --once` for one immediate pass.
+The worker uses a data-directory lock, so only one instance can refresh a
+database at a time. Public feeds may rate-limit repeated manual runs; see
+`/api/v1/signals/freshness` for the latest status of each source.
+
+From `website/frontend/`, run `npm install` and `npm run dev`. The development
+frontend defaults to `http://localhost:5173`; the API defaults to
+`http://localhost:8000`.
+
+## Verification
+
 ```bash
-source .venv/bin/activate
-python -m backend.worker
+cd website
+python -m pytest tests
+python -m scripts.audit_signal_store
+python -m scripts.audit_live_signal_api --require-source-refresh --require-drug-baseline
+cd frontend
+npm run lint
+npm run build
 ```
-The worker processes live data, runs the core `ProductionModel`, and writes predictive signals to the local SQLite database.
 
-### 2. Start the Frontend
+After building, run the following from `website/` to exercise a clean
+temporary API and built frontend without creating an account in the live
+database:
 
-Navigate to `website/frontend/` and install packages:
 ```bash
-npm install
-npm run dev
+python -m scripts.browser_smoke_isolated --signal-years 3 --simulate-rate-limit
 ```
-Open `http://localhost:5173` to view the UI.
 
-## The Production Model
+See [`PRODUCTION_READINESS.md`](PRODUCTION_READINESS.md) for the dated source and
+deployment audit. Older entries in that log describe earlier catalog sizes
+and experiments; use the current API and seed manifest for live counts.
 
-The core logic uses a pipeline that:
-1. Gathers 20 point-in-time-safe news features via scheduled scrapes.
-2. Combines them with localized historical data (CMS, Medicaid SDUD).
-3. Evaluates and predicts demand trajectories for 1300+ CMS Part D drugs and 18 specific ATC classes.
-
-## Safety / Data Rules
-
-Do not commit patient-identifying information, private pharmacy datasets, API keys, passwords, `.env` files, raw production datasets, or unreviewed model artifacts containing sensitive data. Use synthetic, public, or appropriately de-identified data during development.
-
-## Disclaimer
-
-This project is a research/development system. Unless separately validated and authorized, predictions and replenishment quantities must not be represented as medical diagnoses, clinical decisions, guaranteed procurement requirements, or a replacement for pharmacists or other qualified professionals.
+Do not commit private pharmacy records, patient data, API keys, passwords, or
+unreviewed model artifacts. Public proxy signals do not establish local stock,
+wholesaler allocation, or procurement needs.

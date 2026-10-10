@@ -38,3 +38,22 @@ def test_freshness_exposes_worker_liveness_and_source_checks(tmp_path, monkeypat
     assert stale["source_checks"][0]["last_status"] == "failed"
     assert stale["source_checks"][0]["last_success_at"] == now
     assert stale["failed_sources"] == ["source_a"]
+
+
+def test_source_native_definition_is_stable_outside_seed(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "DATA_PATH", str(tmp_path))
+    signal_store.initialize()
+    with signal_store.connect() as db:
+        first = signal_store.ensure_source_definition(
+            db, signal_id="adult_medicaid_enrollment", cadence="monthly",
+            geography_level="state", geography_id="AR", unit="persons",
+            source_name="Medicaid source", source_url="https://example.org/source")
+        second = signal_store.ensure_source_definition(
+            db, signal_id="adult_medicaid_enrollment", cadence="monthly",
+            geography_level="state", geography_id="AR", unit="persons",
+            source_name="Medicaid source", source_url="https://example.org/source")
+        row = db.execute("SELECT * FROM signal_definitions WHERE id=?", (first,)).fetchone()
+    assert first == second == signal_store.signal_uid(dict(row))
+    assert row["unit"] == "persons"
+    assert row["source_url"] == "https://example.org/source"
+    assert first not in {row["id"] for row in signal_store.seed_definitions()}

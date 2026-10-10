@@ -30,6 +30,7 @@ COLLAPSED_DIMENSION_SIGNALS = set()
 MAX_HISTORY_SOURCE_ROWS = 10_000
 SIGNAL_SCHEMA_VERSION = 3
 SEED_DEFINITION_COUNT = 1250
+SEED_HISTORICAL_RECORD_COUNT = 1950
 SEED_DEFINITIONS_PATH = (Path(__file__).resolve().parents[1] / "catalog" /
                          "signal_definitions.json")
 NEWS_VERSION_FIELDS = ("url_hash", "source_name", "title", "url", "source",
@@ -333,8 +334,28 @@ def signal_uid(row: dict) -> str:
     return "sig_" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:24]
 
 
+def ensure_source_definition(db: sqlite3.Connection, *, signal_id: str,
+                             cadence: str, geography_level: str, geography_id: str,
+                             unit: str, source_name: str, source_url: str,
+                             entity_key: str = "", state_definition: str = "") -> str:
+    """Create a stable source-native ID after its feed has passed validation."""
+    identity = {"signal_origin": "model_external_state_feature",
+                "signal_id": signal_id, "cadence": cadence,
+                "geography_level": geography_level, "geography_id": geography_id,
+                "entity_key": entity_key}
+    uid = signal_uid(identity)
+    db.execute("""INSERT OR IGNORE INTO signal_definitions
+        (id, signal_origin, signal_id, cadence, geography_level, geography_id,
+         entity_key, unit, source_name, source_url, state_definition,
+         model_output_type)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'upstream_signal')""",
+        (uid, *identity.values(), unit, source_name, source_url,
+         state_definition))
+    return uid
+
+
 def seed_definitions() -> list[dict]:
-    """Return the exact, validated 1,312-definition public seed manifest."""
+    """Return the exact, validated public seed manifest."""
     payload = json.loads(SEED_DEFINITIONS_PATH.read_text(encoding="utf-8"))
     rows = payload.get("definitions")
     if (payload.get("schema") != "pulse_signal_definitions_v1"
@@ -366,7 +387,7 @@ def import_definitions(source: Path) -> dict:
     if payload.get("schema") != "pulse_signal_definitions_v1":
         raise ValueError("Unsupported signal definition manifest")
     rows = payload.get("definitions")
-    if (not isinstance(rows, list) or len(rows) != 1312
+    if (not isinstance(rows, list) or len(rows) != SEED_DEFINITION_COUNT
             or len(rows) != payload.get("definition_count")):
         raise ValueError("Signal definition manifest count mismatch")
     definitions: list[tuple] = []
@@ -513,8 +534,11 @@ def backfill_catalog_source_urls(db: sqlite3.Connection, observations: Iterable[
 
 
 def import_catalog(source: Path) -> dict:
-    """Idempotently import the frozen catalog without changing its provenance."""
+    """Import only retained seed identities from the frozen source archive."""
     definitions, observations, rejected = catalog_rows(source)
+    seed_ids = {row["id"] for row in seed_definitions()}
+    definitions = {uid: row for uid, row in definitions.items() if uid in seed_ids}
+    observations = [row for row in observations if row[1] in seed_ids]
     initialize()
     with connect() as db:
         db.executemany("""INSERT OR IGNORE INTO signal_definitions
@@ -537,7 +561,8 @@ def import_catalog(source: Path) -> dict:
             "observations_seen": len(observations), "rejected_rows": rejected}
 
 
-def list_signals(*, search: str = "", limit: int = 1500, offset: int = 0) -> list[dict]:
+def list_signals(*, search: str = "", origin: str = "", limit: int = 1500,
+                 offset: int = 0) -> list[dict]:
     initialize()
     with connect() as db:
         rows = db.execute("""SELECT d.*, (SELECT MAX(o.observation_date)
@@ -549,11 +574,23 @@ def list_signals(*, search: str = "", limit: int = 1500, offset: int = 0) -> lis
             (SELECT MAX(o.forecast_horizon) FROM signal_records o
              WHERE o.signal_uid=d.id) AS latest_forecast_horizon
             FROM signal_definitions d
-            WHERE (? = '' OR instr(lower(d.signal_id), lower(?)) > 0
+            WHERE (? = '' OR d.signal_origin = ?)
+              AND (? = '' OR instr(lower(d.signal_id), lower(?)) > 0
                   OR instr(lower(d.entity_key), lower(?)) > 0)
             ORDER BY d.signal_origin, d.signal_id, d.geography_id, d.entity_key
-            LIMIT ? OFFSET ?""", (search, search, search, limit, offset)).fetchall()
+            LIMIT ? OFFSET ?""", (origin, origin, search, search, search,
+                                     limit, offset)).fetchall()
     return [dict(row) for row in rows]
+
+
+def count_signals(*, search: str = "", origin: str = "") -> int:
+    initialize()
+    with connect() as db:
+        return db.execute("""SELECT COUNT(*) FROM signal_definitions d
+            WHERE (? = '' OR d.signal_origin = ?)
+              AND (? = '' OR instr(lower(d.signal_id), lower(?)) > 0
+                  OR instr(lower(d.entity_key), lower(?)) > 0)""",
+                          (origin, origin, search, search, search)).fetchone()[0]
 
 
 def values(ids: Iterable[str], *, start: date | None = None, end: date | None = None,
@@ -581,10 +618,11 @@ def values(ids: Iterable[str], *, start: date | None = None, end: date | None = 
                 parameters.append(end.isoformat())
             if latest_only and not include_unusable:
                 filters.append("""NOT (
-                  (d.signal_id GLOB 'arkansas_atc_demand_state::*' AND o.source_kind = 'historical_catalog') OR
-                  (d.signal_origin='model_news_output' AND o.source_kind = 'historical_catalog') OR
+                  o.source_kind IN ('combined_demand_signals', 'article_text_ridge_shadow_v1') OR
+                  d.signal_id GLOB 'arkansas_atc_demand_state::*' OR
+                  d.signal_origin='model_news_output' OR
                   (d.signal_id GLOB 'cms_part_d_demand_state::*'
-                   AND o.source_kind NOT IN (?, 'combined_demand_signals'))
+                   AND o.source_kind != ?)
                 )""")
                 parameters.append(PUBLISHABLE_DRUG_SOURCE_KIND)
             condition = " AND ".join(filters)
@@ -631,20 +669,24 @@ def values(ids: Iterable[str], *, start: date | None = None, end: date | None = 
         collapsed_dimensions = row["signal_id"] in COLLAPSED_DIMENSION_SIGNALS
         legacy = row["source_kind"] == "historical_catalog"
         
-        # We explicitly allow "combined_demand_signals" and "article_text_ridge_shadow_v1" for production APIs now.
-        valid_sources = {PUBLISHABLE_DRUG_SOURCE_KIND, "combined_demand_signals"}
+        valid_sources = {PUBLISHABLE_DRUG_SOURCE_KIND}
         
         row["usable"] = not (collapsed_dimensions or
-                             (atc_output and legacy) or
-                             (news_output and legacy) or
+                             row["source_kind"] in {"combined_demand_signals",
+                                                    "article_text_ridge_shadow_v1"} or
+                             atc_output or news_output or
                              (drug_output and row["source_kind"] not in valid_sources))
         
         row["unusable_reason"] = (
             "identity_dimensions_collapsed" if collapsed_dimensions else
+            "unsupported_combined_model_output" if row["source_kind"] == "combined_demand_signals" else
+            "unvalidated_article_text_shadow" if row["source_kind"] == "article_text_ridge_shadow_v1" else
             "legacy_zero_filled_feature_vector" if atc_output and legacy else
             "historical_drug_model_output_not_validated_for_live_use" if drug_output and legacy else
             "drug_model_source_kind_not_evaluated_for_live_use" if drug_output and not row["usable"] else
-            "historical_news_artifact_no_verified_live_refresh" if news_output and legacy else None
+            "historical_news_artifact_no_verified_live_refresh" if news_output and legacy else
+            "news_model_output_no_validated_live_pipeline" if news_output else
+            "atc_model_output_no_validated_live_pipeline" if atc_output else None
         )
     grouped: dict[tuple[str, ...], list[dict]] = {}
     for row in raw_rows:
@@ -696,12 +738,14 @@ def freshness() -> dict:
         historical_catalog_records = db.execute("""SELECT COUNT(*) FROM signal_records
             WHERE source_kind='historical_catalog'""").fetchone()[0]
         latest = db.execute("""SELECT MAX(observation_date) FROM signal_records
-            WHERE source_kind != 'article_text_ridge_shadow_v1'""").fetchone()[0]
+            WHERE source_kind NOT IN ('article_text_ridge_shadow_v1',
+                                      'combined_demand_signals')""").fetchone()[0]
         latest_model_target = db.execute("""SELECT MAX(observation_date)
             FROM signal_records WHERE source_kind='article_text_ridge_shadow_v1'""").fetchone()[0]
         by_cadence = [dict(row) for row in db.execute("""SELECT d.cadence,
             COUNT(DISTINCT d.id) AS signals,
-            MAX(CASE WHEN o.source_kind != 'article_text_ridge_shadow_v1'
+            MAX(CASE WHEN o.source_kind NOT IN ('article_text_ridge_shadow_v1',
+                                                'combined_demand_signals')
                      THEN o.observation_date END) AS latest_observation_date,
             MAX(CASE WHEN o.source_kind='article_text_ridge_shadow_v1'
                      THEN o.observation_date END) AS latest_model_target_date
@@ -751,11 +795,11 @@ def freshness() -> dict:
         news_model_status = "running"
         news_model_reason = "shadow_inference_run_in_progress"
     else:
-        news_model_status = "active"
-        news_model_reason = "integrated_into_production_model"
+        news_model_status = "shadow"
+        news_model_reason = "article_text_model_not_validated_for_publication"
     news_model_status_detail = {
         "status": news_model_status,
-        "publishable": True,
+        "publishable": False,
         "reason": news_model_reason,
         "signal_count": news_model["signal_count"],
         "latest_recorded_observation_date": news_model["latest_recorded_observation_date"],
@@ -1031,7 +1075,7 @@ def news_source_checks() -> dict[str, dict]:
 
 
 def recent_public_signals(*, days: int = 3, limit: int = 12) -> list[dict]:
-    """Recently released source context, retaining each true observation period."""
+    """Recently captured source context, retaining each true observation period."""
     initialize()
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
     source_period_cutoff = (datetime.now(timezone.utc).date() - timedelta(days=days)).isoformat()

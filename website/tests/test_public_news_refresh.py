@@ -84,7 +84,7 @@ def test_fda_refresh_removes_stored_approval_index_pages(tmp_path, monkeypatch):
             VALUES (?, ?, ?, 'FDA Drugs RSS', ?, 'rss_pub_date', ?, 1, 'drug')""",
             ("approval-index", title, "https://www.fda.gov/drugs/first-generic-drug-approvals",
              datetime.now(timezone.utc).isoformat(), datetime.now(timezone.utc).isoformat()))
-    monkeypatch.setattr(refresh_public, "fetch_fda_drug_updates", lambda: [])
+    monkeypatch.setattr(refresh_public, "fetch_fda_drug_updates", lambda **kwargs: [])
     refresh_public.refresh_news(("fda_drugs_rss",))
     assert signal_store.recent_news() == []
 
@@ -94,7 +94,7 @@ def test_news_capture_preserves_first_seen_article_versions(tmp_path, monkeypatc
     article = _article("FDA Drugs RSS", "https://www.fda.gov/drugs/shortage-update")
     article["published_at"] = "2026-10-01T10:00:00+00:00"
     article["summary_text"] = "Initial source summary"
-    monkeypatch.setattr(refresh_public, "fetch_fda_drug_updates", lambda: [article.copy()])
+    monkeypatch.setattr(refresh_public, "fetch_fda_drug_updates", lambda **kwargs: [article.copy()])
     first = refresh_public.refresh_news(("fda_drugs_rss",))
     assert first["sources"][0]["evidence_added"] == 1
     with signal_store.connect() as db:
@@ -177,15 +177,15 @@ def test_fda_press_feed_keeps_drug_research_and_excludes_device_news(monkeypatch
 def test_fda_success_keeps_gdelt_failure_visible(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "DATA_PATH", str(tmp_path))
 
-    def unavailable():
+    def unavailable(**kwargs):
         raise RuntimeError("rate limited")
 
     monkeypatch.setattr(refresh_public, "fetch_recent_news", unavailable)
-    monkeypatch.setattr(refresh_public, "fetch_fda_drug_updates", lambda: [
+    monkeypatch.setattr(refresh_public, "fetch_fda_drug_updates", lambda **kwargs: [
         _article("FDA Drugs RSS", "https://www.fda.gov/drug-shortage")])
-    monkeypatch.setattr(refresh_public, "fetch_fda_medwatch_updates", lambda: [])
-    monkeypatch.setattr(refresh_public, "fetch_fda_drug_recalls", lambda: [])
-    monkeypatch.setattr(refresh_public, "fetch_fda_drug_press", lambda: [])
+    monkeypatch.setattr(refresh_public, "fetch_fda_medwatch_updates", lambda **kwargs: [])
+    monkeypatch.setattr(refresh_public, "fetch_fda_drug_recalls", lambda **kwargs: [])
+    monkeypatch.setattr(refresh_public, "fetch_fda_drug_press", lambda **kwargs: [])
     result = refresh_public.refresh_news()
     assert [row["status"] for row in result["sources"]] == ["failed", "success", "success", "success", "success"]
     with signal_store.connect() as db:
@@ -218,7 +218,7 @@ def test_fda_success_keeps_gdelt_failure_visible(tmp_path, monkeypatch):
 def test_both_news_failures_are_recorded(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "DATA_PATH", str(tmp_path))
 
-    def unavailable():
+    def unavailable(**kwargs):
         raise RuntimeError("source unavailable")
 
     monkeypatch.setattr(refresh_public, "fetch_recent_news", unavailable)

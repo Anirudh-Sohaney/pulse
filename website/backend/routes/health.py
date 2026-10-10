@@ -20,7 +20,8 @@ async def readiness():
     seed = signal_store.catalog_seed_status()
     ready = (not seed["missing_ids"]
              and coverage["definitions"] >= seed["expected"]
-             and coverage["historical_catalog_records"] >= 4097)
+             and coverage["historical_catalog_records"] >=
+                 signal_store.SEED_HISTORICAL_RECORD_COUNT)
     return JSONResponse(status_code=200 if ready else 503,
                         content={"ready": ready, "signal_definitions": coverage["definitions"],
                                  "seed_definitions_expected": seed["expected"],

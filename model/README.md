@@ -1,5 +1,13 @@
 # Arkansas Pharmaceutical Signal Model
 
+> **Checkout note (2026-10-10):** This document retains research results and
+> links for `rebuilt_demand/`, but that source directory is absent from this
+> checkout and local HEAD. An earlier experimental version is in reachable
+> local Git history; its training and export commands cannot be run from this
+> checkout as written. The exported article inference artifact and
+> its shadow backend runner remain under `website/`; they are not validated
+> production demand outputs.
+
 This directory contains the code, tests, research notes, and generated artifacts for an Arkansas-first system that builds public-data signals and evaluates forecasts related to pharmaceutical demand, disease pressure, drug shortages, recalls, and distribution. It combines data adapters, identity and geography mapping, time-aware feature construction, baseline and research models, chronological evaluation, and guarded output contracts.
 
 The system is designed as a contextual signal layer for pharmacy and public-health analysis. It is **not** a source of observed pharmacy stock-on-hand, wholesaler allocation, backorder, or stockout truth: the public datasets used here generally do not record those outcomes. Any “demand,” “supply risk,” “shortage pressure,” or similar value must be interpreted according to the target and evidence fields attached to it. A metric being forecastable does not establish that it improves private pharmacy inventory decisions.

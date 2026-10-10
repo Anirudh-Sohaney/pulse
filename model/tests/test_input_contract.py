@@ -238,7 +238,13 @@ def test_near_real_time_source_registry_covers_public_inputs():
         "nadac_per_unit_min", "respnet_rsv_rate", "arcos_distribution_grams",
         "arcos_retail_units", "regional_distribution_pressure",
     }
-    assert set(NEAR_REAL_TIME_SOURCE_REGISTRY) == expected
+    annual_ili_features = {"ar_ili_mean", "ar_wili_mean", "nat_ili_mean", "nat_wili_mean"}
+    assert set(NEAR_REAL_TIME_SOURCE_REGISTRY) == expected | annual_ili_features
+    assert NEAR_REAL_TIME_SOURCE_REGISTRY["ar_wili_mean"]["adapter_status"] == (
+        "blocked_requires_feature_retraining")
+    for name in annual_ili_features - {"ar_wili_mean"}:
+        assert NEAR_REAL_TIME_SOURCE_REGISTRY[name]["adapter_status"] == (
+            "point_in_time_candidate_available_retraining_required")
     audit = audit_near_real_time_sources(expected)
     assert audit["variable_count"] == 22
     assert audit["all_sources_documented"] is True

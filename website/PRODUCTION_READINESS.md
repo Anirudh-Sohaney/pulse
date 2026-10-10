@@ -4,6 +4,48 @@ This document records the current implementation and its remaining gates. It is
 not a claim that every catalog value is current or that the platform is ready
 for a public launch.
 
+## Current local signal audit (2026-10-10)
+
+The checked-in seed manifest now has **1,250 IDs**: 1,212 CMS Part D demand
+outputs, 18 legacy ATC outputs, and 20 archived news outputs. After the local
+source refresh, the catalog has **1,480 IDs** and 30,621 records. The latest
+non-shadow source period is 2026-10-03. The evaluated CMS baseline serves
+1,324 drug rankings for target year 2026 from 2024 source claims. The 20
+article-text estimates remain shadow-only and the 18 legacy ATC outputs remain
+unusable. The saved research artifact under `model/` is not a live backend
+checkpoint. BLS hit its public daily request cap during repeated manual tests;
+its prior captured observations remain available and the failed check is
+visible through `/freshness`.
+
+This section supersedes earlier operational counts in the dated log below.
+Those entries preserve the history of the previous 1,312-ID manifest and
+4,097-row import; the current importer retains 1,950 historical rows for the
+1,250 seed IDs, plus 1,220 older news-bridge rows. The current startup audit
+checks seed identity, SQLite integrity and foreign keys, archived row content,
+date and timestamp validity, weekly Saturday periods, wastewater site counts,
+enforcement window dates, and shadow article provenance. It does not currently
+recompute every live source row hash, so older claims of that check below are
+historical rather than a current release guarantee.
+
+The current website suite passed 87 tests, frontend lint and build passed,
+and the isolated built-browser smoke passed with three years of signal history
+and an injected 429 retry. A broader `model/tests` run passed 354 tests and
+failed 26. Several failures are blocked by local Git LFS pointer files rather
+than hydrated research datasets (including the publishable test suite);
+others refer to missing or stale evaluation artifacts. Those model gates are
+not satisfied, and the saved research model must remain outside the live API.
+
+The read-only live API audit passed across all 1,480 catalog IDs, 1,442 usable
+latest values, nine representative source histories, and all 1,324 ranked
+drugs. It confirmed that 20 article outputs and 18 ATC outputs have no usable
+latest value. Run it from `website/` with
+`python -m scripts.audit_live_signal_api --require-source-refresh --require-drug-baseline`.
+The `model/README.md` also describes a `model/rebuilt_demand/` retraining
+workflow whose source directory is absent from this checkout and local HEAD.
+Its earlier experimental source exists in reachable local Git history, but
+the documented commands cannot run from this checkout as written. The
+backend's checksum-pinned article inference artifact is present.
+
 The root `.github/workflows/ci.yml` is configured to run the complete backend test suite,
 frontend lint/typecheck/build and runtime dependency audit, and a Compose smoke
 test for the API, frontend proxy, built Chromium in-browser training,
@@ -94,20 +136,19 @@ so the ranking uses the newly committed source generation.
 Run the frontend from `website/frontend/` with
 `npm install` and `npm run dev`. The API is at `http://localhost:8000`; the
 frontend is normally at `http://localhost:5173`. After importing or refreshing, run `python -m scripts.audit_signal_store` to
-check all 1,312 seed IDs and runtime-generated IDs, SQLite integrity and foreign keys, canonical signal
+check all 1,250 seed IDs and runtime-generated IDs, SQLite integrity and foreign keys, canonical signal
 period dates, finite values, timezone-aware ingestion/source timestamps, and
-the exact stored fields of all 4,097 rows from the SHA-256-pinned historical
+the exact stored fields of all 1,950 retained rows from the SHA-256-pinned historical
 catalog. Existing blank historical source URLs are filled from that source
 file; changed nonblank provenance or numeric values fail the audit.
-For FluView, NNDSS, and WVAL rows, the audit also checks Saturday observation
-periods, source release times, allowed geography/metric identities, units,
-source URLs, reporting-site counts where applicable, and recomputed row hashes
-before the API starts.
+For FluView, NNDSS, and WVAL rows, the audit checks Saturday observation
+periods; it also checks wastewater reporting-site counts and shadow-model
+article provenance before the API starts.
 Blank source times are permitted only for historical catalog and news-bridge
 rows whose publication time is unknown. `website/catalog/` includes the
-1,312-ID manifest and an exact, SHA-256-pinned copy of the 6,484-row
-2023–2025 historical research catalog. The source contains 2,387 byte-identical
-duplicate rows; import stores 4,097 distinct records and stays idempotent.
+1,250-ID manifest and an exact, SHA-256-pinned copy of the 6,484-row
+2023–2025 historical research catalog. The importer retains 1,950 distinct
+records for the current seed identities and stays idempotent.
 Startup fails if the bundled file is
 missing or changed, instead of silently booting a definitions-only service.
 The import preserves each actual period and source timestamp and marks legacy
