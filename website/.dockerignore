@@ -13,3 +13,13 @@ __pycache__
 .pytest_cache
 *.pyc
 *.log
+README.md
+PRODUCTION_READINESS.md
+docs.md
+deploy/
+docker-compose*.yml
+.env.example
+.env.cloud.example
+Makefile
+pytest.ini
+pyproject.toml
