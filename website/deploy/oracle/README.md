@@ -13,7 +13,13 @@ Commit and push tested changes to `codex/production-readiness`. The enabled
 non-fast-forward branch, hydrates the pinned CMS Git LFS source, runs cloud
 preflight, builds and starts Compose, checks the internal services and public
 HTTPS site, coverage API, and browser model file, then writes
-`/var/lib/pulse/deployed-commit`. For an immediate update:
+`/var/lib/pulse/deployed-commit`.
+
+A revision changing only the listed Markdown documentation files skips the
+container rebuild, checks the same live routes, and advances the recorded Git
+revision without interrupting the running application.
+
+For an immediate update:
 
 ```bash
 ssh dev_server 'sudo systemctl start pulse-update.service'

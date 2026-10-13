@@ -33,17 +33,32 @@ if [[ "$deployed" == "$target" ]]; then
   exit 0
 fi
 
-# Only hydrate the research artifact needed by the live CMS refresh.
-git lfs pull --include="$source_path" --exclude=''
-cd "$repo/website"
-python3 -m scripts.cloud_preflight
-compose=(docker compose -f docker-compose.yml -f docker-compose.cloud.yml -f docker-compose.oracle.yml)
-"${compose[@]}" config --quiet
-"${compose[@]}" build backend worker backup frontend
-# Compose can deduplicate the identical backend and initializer builds without
-# tagging the initializer image. Build it in a separate invocation.
-"${compose[@]}" build data-permissions
-"${compose[@]}" up -d --no-build --remove-orphans
+docs_only=false
+if [[ -n "$deployed" ]] && git cat-file -e "$deployed^{commit}" 2>/dev/null; then
+  docs_only=true
+  while IFS= read -r changed; do
+    case "$changed" in
+      README.md|website/README.md|website/PRODUCTION_READINESS.md|website/docs.md|website/deploy/oracle/README.md) ;;
+      *) docs_only=false; break ;;
+    esac
+  done < <(git diff --name-only "$deployed" "$target")
+fi
+
+if [[ "$docs_only" == true ]]; then
+  echo 'Documentation-only revision; retaining the running containers'
+else
+  # Only hydrate the research artifact needed by the live CMS refresh.
+  git lfs pull --include="$source_path" --exclude=''
+  cd "$repo/website"
+  python3 -m scripts.cloud_preflight
+  compose=(docker compose -f docker-compose.yml -f docker-compose.cloud.yml -f docker-compose.oracle.yml)
+  "${compose[@]}" config --quiet
+  "${compose[@]}" build backend worker backup frontend
+  # Compose can deduplicate the identical backend and initializer builds without
+  # tagging the initializer image. Build it in a separate invocation.
+  "${compose[@]}" build data-permissions
+  "${compose[@]}" up -d --no-build --remove-orphans
+fi
 
 for attempt in $(seq 1 60); do
   if curl --fail --silent --max-time 5 http://127.0.0.1:8000/ready >/dev/null &&
@@ -66,5 +81,5 @@ for attempt in $(seq 1 60); do
 done
 
 echo 'Deployment did not become healthy within five minutes' >&2
-"${compose[@]}" ps >&2
+docker ps >&2
 exit 1
