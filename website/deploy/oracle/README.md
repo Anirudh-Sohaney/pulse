@@ -11,8 +11,9 @@ Commit and push tested changes to `codex/production-readiness`. The enabled
 `pulse-update.timer` checks GitHub every five minutes and runs
 `refresh_from_github.sh` as `ubuntu`. It refuses dirty tracked files or a
 non-fast-forward branch, hydrates the pinned CMS Git LFS source, runs cloud
-preflight, builds and starts Compose, waits for the API and frontend, then
-writes `/var/lib/pulse/deployed-commit`. For an immediate update:
+preflight, builds and starts Compose, checks the internal services and public
+HTTPS site, coverage API, and browser model file, then writes
+`/var/lib/pulse/deployed-commit`. For an immediate update:
 
 ```bash
 ssh dev_server 'sudo systemctl start pulse-update.service'
@@ -36,8 +37,11 @@ ssh dev_server 'sudo certbot renew --dry-run'
 ```
 
 `backend`, `worker`, `backup`, and `frontend` use Compose restart policies.
-Docker and the update timer are enabled at boot. The worker refreshes public
-sources at 16:00 UTC and retries due failures without replacing successful
+Docker and the update timer are enabled at boot. A controlled 2026-10-13 reboot
+confirmed that the data mount, four containers, Nginx, firewall, and timers
+returned and that the public site and coverage API again served HTTP 200.
+The worker refreshes public sources at 16:00 UTC and retries due failures
+without replacing successful
 values. The backup worker creates a verified snapshot at 04:00 UTC and retries
 failed exports hourly. Check `/api/v1/signals/freshness` for source periods and
 last attempts; a healthy worker heartbeat alone does not prove current source
@@ -77,3 +81,8 @@ Production secrets are in ignored files under `website/secrets/`; the ignored
 `website/.env` has the domain and backup mount configuration. Keep both out of
 Docker image contexts and repository commits. Current images have neither
 `/app/.env` nor `/app/secrets`; `.dockerignore` enforces that boundary.
+
+This branch currently has no GitHub Actions workflow. Use the local backend
+suite, frontend lint/build, isolated browser smoke, and live API audit as
+release checks until CI is restored with a GitHub credential permitted to add
+workflow files.

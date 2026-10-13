@@ -47,7 +47,16 @@ compose=(docker compose -f docker-compose.yml -f docker-compose.cloud.yml -f doc
 
 for attempt in $(seq 1 60); do
   if curl --fail --silent --max-time 5 http://127.0.0.1:8000/ready >/dev/null &&
-     curl --fail --silent --max-time 5 http://127.0.0.1:3141/ >/dev/null; then
+     curl --fail --silent --max-time 5 http://127.0.0.1:3141/ >/dev/null &&
+     curl --fail --silent --max-time 5 --resolve \
+       pulseintelligence.tech:443:127.0.0.1 \
+       https://pulseintelligence.tech/ >/dev/null &&
+     curl --fail --silent --max-time 5 --resolve \
+       pulseintelligence.tech:443:127.0.0.1 \
+       https://pulseintelligence.tech/api/v1/signals/coverage/summary >/dev/null &&
+     curl --fail --silent --max-time 5 --resolve \
+       pulseintelligence.tech:443:127.0.0.1 \
+       https://pulseintelligence.tech/browser_forecast.py >/dev/null; then
     install -d -m 0700 "$state_dir"
     printf '%s\n' "$target" > "$state_file"
     echo "Deployed $target"

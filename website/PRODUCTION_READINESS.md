@@ -32,8 +32,18 @@ AES-256-GCM encrypted bundle to a separate Oracle block volume. A restore
 rehearsal of the 2026-10-13 snapshot passed, including catalog and account API
 checks. That volume is on the same Oracle host, so disaster recovery after
 loss of the entire host still needs an independently stored encrypted copy and
-separate custody of the backup key. A full host reboot recovery check remains
-to be performed.
+separate custody of the backup key. A controlled reboot on 2026-10-13
+confirmed that the block volume, host Nginx, firewall, timers, and all four
+application containers returned without manual intervention; the public site
+and coverage API again returned HTTP 200, and source and backup health checks
+remained green.
+The current website backend suite passed 97 tests, frontend lint/build and an
+isolated Chromium browser smoke passed, the live API audit passed across all
+1,480 catalog IDs and 1,018 ranked drugs, and production `npm audit` and
+`pip-audit` found no known vulnerabilities. The live auth route returned 429
+under a controlled burst, confirming the host rate limit. Reachable Git
+history has no tracked `.env`, secret directory, PEM, or key file; a current
+tracked-content scan found no common private-key or API-token formats.
 
 ## Current local signal audit (2026-10-10)
 
@@ -139,26 +149,20 @@ source snapshots, and 30,621 total records. Clients should rediscover these
 IDs through `/catalog`. The pre-migration SQLite backup is
 `website/data/backups/pre_enforcement_cadence_2026-10-10.sqlite3`.
 
-The root `.github/workflows/ci.yml` is configured to run the complete backend test suite,
-frontend lint/typecheck/build and runtime dependency audit, and a Compose smoke
-test for the API, frontend proxy, built Chromium in-browser training,
-encrypted plan reload without private CSV uploads, evaluated CMS baseline,
-read-only signal date/provenance audit, verified backup and restore, worker
-imports, cloud secret mounting, and production Caddy routing over a local
-HTTP test listener. The smoke job fetches only
-the committed CMS source artifact from Git LFS. The 55 KB historical catalog
-is bundled under `website/catalog/`; signal API tests compare it with the
-original fixture and do not depend on an ignored laptop directory. This replaces the former
-`website/.github/workflows/ci.yml`, which GitHub did not discover from the
-repository root and which checked only two files. Local tests can pass before
-the workflow has run on GitHub; inspect the actual run before using it as a
-release gate.
+The current branch has no GitHub Actions workflow. Commit `60ade53` removed
+the workflow after a GitHub token without workflow-edit permission rejected
+the push. `gh run list` shows no CI runs for this branch. Local backend tests,
+frontend lint/build, a browser smoke, and the live checks in the Oracle
+runbook are the present release evidence; automated GitHub CI remains a gap.
+The 55 KB historical catalog is bundled under `website/catalog/`; signal API
+tests compare it with the original fixture and do not depend on an ignored
+laptop directory.
 
 On 2026-10-05, the pinned production Python dependencies resolved with a
 Python 3.14 wheel-only pip dry run, and `npm audit --omit=dev
---audit-level=high` reported zero vulnerabilities. These checks do not replace
-the container build or the GitHub workflow run; neither has run from this
-uncommitted worktree.
+--audit-level=high` reported zero vulnerabilities. Those were dated local
+checks; the current Oracle image has since been built and run, while this
+branch has no GitHub Actions workflow.
 
 On 2026-10-05, an isolated local API database and Vite frontend passed
 `scripts/browser_smoke.py --signal-years 3 --simulate-rate-limit`. The browser
@@ -447,15 +451,11 @@ Keep the Caddy `/data` volume across deployments because it holds issued TLS
 certificates. The Compose backup worker creates verified local snapshots and
 exports encrypted bundles to the configured mount. Confirm that mount is
 actually remote or independently replicated, and rehearse recovery using the
-chosen storage service before relying on it for host-loss recovery. The overlay is a deployment
-template: no cloud domain, DNS, firewall, signing key, or off-host mount has
-been configured here. CI is configured to validate its Compose merge,
-Caddyfile syntax, production API/worker/backup startup configuration, and a
-backup restore once the workflow runs. A verified standalone
-Docker Compose 5.6.0 binary merged the base and cloud files successfully, and
-Caddy 2.11.7 validated the formatted Caddyfile locally. Docker Engine is
-unavailable on this laptop, so the containers and TLS ingress have not been
-run here.
+chosen storage service before relying on it for host-loss recovery. The Caddy
+overlay remains a template for other hosts. The Oracle deployment uses host
+Nginx and the Oracle Compose overlay; its live API, source refresh, backup,
+HTTPS renewal, and reboot recovery were checked on 2026-10-13. The same-host
+block volume is still not an independent offsite backup.
 The backend startup imports the checked-in catalog, materializes previously
 captured NADAC and FDA shortage snapshots into stable source signals, and
 audits the database before opening the API. The materializer is idempotent
