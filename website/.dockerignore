@@ -1,4 +1,6 @@
 .venv
+.env
+secrets/
 data
 ml/models
 frontend/node_modules
