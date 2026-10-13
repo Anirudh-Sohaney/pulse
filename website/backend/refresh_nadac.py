@@ -21,16 +21,18 @@ PROPERTIES = ("ndc", "nadac_per_unit", "pricing_unit",
               "classification_for_rate_setting", "as_of_date")
 
 
-def _url(*, as_of_date: str | None = None, offset: int = 0,
+def _url(*, as_of_date: str | None = None, on_or_before: str | None = None, offset: int = 0,
          limit: int = PAGE_SIZE) -> str:
+    if as_of_date and on_or_before:
+        raise ValueError("Choose one NADAC date filter")
     query: list[tuple[str, str | int]] = [("limit", limit), ("offset", offset)]
-    if as_of_date:
+    if as_of_date or on_or_before:
         query.extend((
             ("conditions[0][property]", "as_of_date"),
-            ("conditions[0][operator]", "="),
-            ("conditions[0][value]", as_of_date),
+            ("conditions[0][operator]", "=" if as_of_date else "<="),
+            ("conditions[0][value]", as_of_date or on_or_before or ""),
         ))
-    else:
+    if not as_of_date:
         query.extend((("sorts[0][property]", "as_of_date"),
                       ("sorts[0][order]", "desc")))
     query.extend((f"properties[{index}]", field) for index, field in enumerate(PROPERTIES))
@@ -49,7 +51,8 @@ def _fetch(url: str) -> dict:
 
 
 def fetch_latest_snapshot() -> tuple[str, list[dict], str]:
-    latest_page = _fetch(_url(limit=1))
+    today = datetime.now(timezone.utc).date()
+    latest_page = _fetch(_url(on_or_before=today.isoformat(), limit=1))
     if not latest_page["results"]:
         raise ValueError("NADAC API returned no rows")
     as_of = str(latest_page["results"][0].get("as_of_date") or "")
@@ -57,7 +60,7 @@ def fetch_latest_snapshot() -> tuple[str, list[dict], str]:
         source_day = date.fromisoformat(as_of)
     except ValueError as exc:
         raise ValueError(f"Invalid NADAC as_of_date: {as_of!r}") from exc
-    if source_day > datetime.now(timezone.utc).date():
+    if source_day > today:
         raise ValueError("NADAC API returned a future snapshot date")
     rows: list[dict] = []
     count: int | None = None
