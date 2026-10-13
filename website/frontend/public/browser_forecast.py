@@ -109,10 +109,13 @@ def _read_inventory(csv_text, sales, *, today=None):
             sales_part[["date"]].sort_values("date"),
             inventory_part[["date", "on_hand_units"]].sort_values("date"),
             on="date", direction="backward", tolerance=pd.Timedelta(days=1))
-        if aligned.on_hand_units.notna().sum() < 180:
+        covered_days = int(aligned.on_hand_units.notna().sum())
+        if covered_days < 180:
             raise ValueError(
-                f"{drug} needs inventory snapshots covering at least 180 sales days "
-                "(same day or previous day) to train with inventory history")
+                f"{drug}: inventory covers {covered_days} sales days; at least 180 "
+                "are required. Upload dated inventory history, not a single current "
+                "stock snapshot. Each covered sales day needs an inventory reading "
+                "from that day or the previous day.")
     return frame, latest
 
 

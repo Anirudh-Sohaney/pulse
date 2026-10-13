@@ -7,6 +7,12 @@ let inventoryCsv = ''
 let signalYears = 0
 let localToday = ''
 
+function errorMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error)
+  const validation = [...message.matchAll(/(?:^|\n)ValueError:\s*([^\r\n]+)/g)].pop()
+  return validation?.[1] ?? message
+}
+
 self.onmessage = async (event: MessageEvent<PrepareMessage | TrainMessage>) => {
   try {
     if (event.data.type === 'prepare') {
@@ -47,6 +53,6 @@ prepared_window = json.dumps({"start_date": _start.date().isoformat(), "end_date
     await runtime.runPythonAsync('result = train(payload)')
     self.postMessage({ type: 'success', result: JSON.parse(runtime.globals.get('result') as string) })
   } catch (error) {
-    self.postMessage({ type: 'error', message: error instanceof Error ? error.message : String(error) })
+    self.postMessage({ type: 'error', message: errorMessage(error) })
   }
 }
