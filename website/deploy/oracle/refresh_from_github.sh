@@ -39,7 +39,10 @@ cd "$repo/website"
 python3 -m scripts.cloud_preflight
 compose=(docker compose -f docker-compose.yml -f docker-compose.cloud.yml -f docker-compose.oracle.yml)
 "${compose[@]}" config --quiet
-"${compose[@]}" build data-permissions backend worker backup frontend
+"${compose[@]}" build backend worker backup frontend
+# Compose can deduplicate the identical backend and initializer builds without
+# tagging the initializer image. Build it in a separate invocation.
+"${compose[@]}" build data-permissions
 "${compose[@]}" up -d --no-build --remove-orphans
 
 for attempt in $(seq 1 60); do
