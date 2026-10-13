@@ -1,5 +1,52 @@
 # Model comparison: rebuilt demand models
 
+## Multi-horizon synthetic XGBoost (2026-10-11)
+
+The current reproducible trainer is
+`model/scripts/train_synthetic_horizon_xgb.py`; saved boosters and the full
+per-drug score/feature manifest are under
+`model/trained/synthetic_horizon_xgb_v1/`. It targets future **recorded units
+sold** over 1, 7, 14, or 30 days for each of 30 drugs at the single synthetic
+pharmacy. The same 1,312 candidate signal series are available to every
+horizon. For each drug and horizon, five distinct series are selected by
+absolute correlation using training rows only; aliases are removed.
+
+The chronological split starts validation on 2024-10-19 and test on
+2025-05-26. Targets crossing a split boundary are purged. Three depth-2
+XGBoost profiles are tried for both arms, and signal models also try one-day
+versus 1/7/14-day signal lags. The lowest validation WAPE determines the
+profile and whether signals are used; final test labels do not select a model.
+
+| Target | Signal pooled WAPE | Sales-only pooled WAPE | Signal better drugs | Validation-selected pooled WAPE |
+|---|---:|---:|---:|---:|
+| Next day | 42.34% | 43.57% | 21/30 | 42.30% |
+| Next 7 days | 29.69% | 28.66% | 11/30 | 29.54% |
+| Next 14 days | 30.66% | 30.02% | 11/30 | 30.66% |
+| Next 30 days | 30.72% | 32.70% | 15/30 | 28.85% |
+
+WAPE is absolute error divided by observed units across test origins. Because
+each row targets a rolling cumulative window, neighboring origins share
+outcome days; these counts are not independent test events. The archive lacks
+historical publication timestamps for many signals, so making each signal
+available one day after its recorded period end is an unverified availability
+assumption. This is a synthetic capability study, not evidence that the
+monthly 20-signal article model is validated or that these models predict
+real dispensing. The prior fixed 14-day recipe below uses different feature
+selection and training settings; its score is a separate experiment.
+
+The 20 named historical article-signal IDs are candidate **inputs**, not the
+1/7/14/30-day target outputs. They contain two exact alias pairs, leaving 18
+distinct historical series; all 18 were selected at least once across the
+120 drug/horizon models, but each individual model uses at most five signal
+series. Their monthly cadence remains monthly even when the drug-sales target
+window is one day.
+
+> **Checkout status:** The original `model/rebuilt_demand/` trainer and its
+> saved grid outputs were removed in commit `77c9427`. This report preserves
+> the historical 90-grid results, but that full grid cannot be rerun from the
+> current checkout. The fixed-recipe event-window audit is reproducible with
+> `model/scripts/evaluate_synthetic_event_windows.py`.
+
 ## Protocol
 
 The grid has 10 feature-input variants × 9 XGBoost profiles = 90 configurations. Each of 30 synthetic drug series gets its own model. The first 60% of dates select signals and fit validation models; the next 20% selects the configuration by unweighted mean per-drug WAPE. The validation winner is then refit on the first 80% and evaluated once on the final 20%. A 14-day purge before each boundary prevents the next-14-day training labels from overlapping validation or final-test outcomes. No configuration was selected from final-test results.
@@ -113,7 +160,28 @@ Validation selected `top5_all_lag1__shallow_poisson` at 24.61% mean per-drug WAP
 
 The repository already contains an earlier report in `../data/synthetic_pharmacy_data/current_benchmark_results.md`: top-five signals at 1-, 7-, and 14-day lags were reported at 29.40% WAPE versus 32.35% for sales-only on this synthetic final period. That runner did not purge the 14-day target horizon at the train/test boundary, so its numbers are exploratory and may be optimistic; its XGBoost recipe and selection implementation also differ. This purged expanded grid is reported below and its validation winner is compared with a matched sales-only baseline on final dates.
 The prior fixed recipe is also rerun directly with a 14-day purge: top-five raw-value correlation selection, 1/7/14-day signal lags, and the original 220-tree depth-2 XGBoost settings. It scores 29.27% pooled WAPE versus 31.96% for the same-profile sales-only baseline. Its configuration is included in the comparison table; this isolates the effect of the boundary purge from the newer grid's tuning choices.
-The historical recipe is saved as a separate inference option in `rebuilt_demand/models/legacy_recipe/` with its own feature manifest, `rebuilt_demand/legacy_recipe_demand_model.json`. Its paired per-drug results are saved in `rebuilt_demand/legacy_recipe_per_drug_test.csv`.
+
+The event-window audit reruns this fixed recipe on the same purged final test,
+then marks a forecast origin as an event window when any of the next 14 target
+days carries a dated supply/outbreak-response, flu, or 2025 summer-COVID tag.
+The result is stronger during the generator's tagged event windows and
+reverses on the other dates:
+
+| Test slice | Origins | Signal WAPE | Sales-only WAPE | Relative WAPE reduction |
+|---|---:|---:|---:|---:|
+| All final-test origins | 6,180 | 29.27% | 31.96% | 8.43% |
+| Target overlaps tagged event days | 2,256 | 43.65% | 49.43% | 11.70% |
+| Other target windows | 3,924 | 13.10% | 12.32% | -6.35% |
+
+This is evidence that XGBoost used the supplied features in the scenario it
+was built to represent. The synthetic generator itself applies a one-month-
+lagged multiplier derived from the same frozen `national_supply_chain_risk`
+signal to acute-drug demand. The result therefore demonstrates conditional
+capability, not independent validation of real-world outbreak forecasting.
+Reproduce the slice with
+`PYTHONPATH=model website/.venv/bin/python model/scripts/evaluate_synthetic_event_windows.py`;
+the saved metrics are in `model/docs/synthetic_event_window_metrics.json`.
+The historical fixed-recipe model weights, feature manifest, and raw per-drug CSV were removed with `model/rebuilt_demand/`. This report retains the per-drug table below; the current event-window script recomputes aggregate scores but does not export model weights.
 
 | Drug | Historical recipe WAPE | Matched sales-only WAPE | WAPE reduction |
 |---|---:|---:|---:|
@@ -181,17 +249,17 @@ The historical recipe is saved as a separate inference option in `rebuilt_demand
 | Sertraline 50 mg tablet | 10.78% | 12.17% | 11.44% | 6.350 | 7.839 | 206 |
 | Simvastatin 40 mg tablet | 12.88% | 12.82% | -0.50% | 4.117 | 5.061 | 206 |
 
-The full configuration objects and per-split metrics are in `rebuilt_demand/comparison_results.json`; the compact table is in `rebuilt_demand/comparison_results.csv`. Per-drug test metrics for the validation-selected model and fixed historical recipe are in `rebuilt_demand/selected_model_per_drug_test.csv` and `rebuilt_demand/legacy_recipe_per_drug_test.csv`.
+The raw configuration objects, per-split metrics, and per-drug CSV files were removed with `model/rebuilt_demand/`; this report preserves the 90-row validation table and the per-drug tables for the two discussed recipes.
 
 ## Initial 20-signal replacement
 
-The original article-to-signal runner and weights were not found in the inspected Git history. The available 20-column table is a dated output artifact, not per-article training labels. The 3DLNews `.gz` files are Git LFS pointers, but a separate GDELT article corpus is present: 354 records, 292 with full text, across only 10 distinct publication months from 2023-10 through 2025-12. Those sparse month aggregates are insufficient for a defensible article-conditioned model over the 97 monthly target rows. The replacement therefore forecasts each of the same 20 output columns one month ahead from their own historical lags and calendar features. It does not claim to recover news understanding or reproduce the original model.
+The original article-to-signal runner and weights were not found in the inspected Git history. The available 20-column table is a dated monthly output artifact, not per-article labels. The local 3DLNews2 Arkansas archives are now available as full JSONL text, not LFS pointers: 13,689 records, including 8,035 with article content, with dated text in each month from 2018-01 through 2022-12. That gives 60 months overlapping the 97 monthly output rows and is a materially better historical text source than the sparse GDELT experiment below. It is enough to run a time-ordered article-text-to-20-output experiment, but 60 monthly examples still require strict chronological holdouts and do not establish generalization through 2026. The lag-only replacement forecasts each output from its own history; it does not claim to recover news understanding or reproduce the missing original model. See `data/targeted_additions/arkansas_news_3dlnews/README.md` for archive provenance and extraction counts.
 
 The historical traces support that boundary: commit `d5e11df` contains a downstream `prod_pipeline.py` that consumes dated 20-signal outputs; `d6ca4b7` archives a README, completion gate, and monthly signal table without an upstream runner or weights; and `6d13c14` summarizes already-extracted `lm_event`/`lm_stage`/`lm_direction` fields. The local news artifact metadata mentions GDELT and FLAN-T5-small, but no matching inference implementation or weights were found. The investigation is detailed in `docs/NEWS_ONLY_INTEGRATION.md`.
 
-It trains on 97 monthly output rows from 2018-01-01 to 2026-01-01 and evaluates the last 20 rows beginning 2024-06-01. Mean holdout MAE is 6.3771 versus 8.9300 for persistence. Per-signal metrics and the 20 next-month output values are saved in `rebuilt_demand/initial_20_metrics.json` and `rebuilt_demand/models/initial_20_signals/next_month_20_signals.csv`.
+The historical temporal replacement trained on 97 monthly output rows from 2018-01-01 to 2026-01-01 and evaluated the last 20 rows beginning 2024-06-01. Its recorded mean holdout MAE is 6.3771 versus 8.9300 for persistence. The replacement's code, per-signal metrics, and next-month output file were removed with `model/rebuilt_demand/`; this lag-only result does not validate article extraction.
 
-A separate text-to-output experiment is in `rebuilt_demand/train_news_text.py`. It uses the local GDELT articles and same-month archived outputs; only 10 months overlap (six train, two validation, two test). Its two-month test pooled WAPE was 11.91% versus 87.07% for persistence, with pooled MAE 0.944 versus 6.9. Because the test covers only two months and uses same-month article aggregates, the result is exploratory and not a reliable ahead-of-time forecast. Reproduction outputs are `rebuilt_demand/article_text_20_signal_metrics.json`, `rebuilt_demand/article_text_20_signal_test_predictions.csv`, and `rebuilt_demand/models/initial_20_signals/article_text_model.joblib`.
+A separate text-to-output experiment was reported using same-month aggregated GDELT articles and archived outputs; only 10 months overlapped (six train, two validation, two test). Its recorded two-month test pooled WAPE was 11.91% versus 87.07% for persistence, with pooled MAE 0.944 versus 6.9. The original training source, metrics file, and prediction file are absent from this checkout. With only two test months and same-month article aggregation, this is exploratory and does not validate an ahead-of-time news model.
 
 ## Interpretation and limitations
 

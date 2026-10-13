@@ -13,7 +13,7 @@ import math
 import statistics
 from collections import defaultdict
 from calendar import monthrange
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from urllib.request import Request, urlopen
 
 from .signal_store import connect, ensure_source_definition, initialize
@@ -27,15 +27,17 @@ BLS_SERIES = {
 SOURCE_KIND = "bls_public_api_v1"
 DERIVED_KIND = "bls_public_api_v1_derived_v2"
 INVALID_DERIVED_KIND = "bls_public_api_v1_derived"
+BLS_REFRESH_INTERVAL = timedelta(days=7)
 
 
-def fetch_series(series_id: str, *, timeout: int = 25) -> list[dict]:
+def fetch_series(series_id: str, *, timeout: int = 25,
+                 start_year: int = 2000) -> list[dict]:
     if series_id not in BLS_SERIES.values():
         raise ValueError("Unexpected BLS series ID")
     url = "https://api.bls.gov/publicAPI/v1/timeseries/data/"
     rows: list[dict] = []
     current_year = datetime.now(timezone.utc).year
-    for start in range(2000, current_year + 1, 10):
+    for start in range(start_year, current_year + 1, 10):
         end = min(start + 9, current_year)
         payload_body = json.dumps({"seriesid": [series_id],
                                    "startyear": str(start), "endyear": str(end)}).encode()
@@ -54,6 +56,23 @@ def fetch_series(series_id: str, *, timeout: int = 25) -> list[dict]:
             raise ValueError(f"BLS response contains no observations for {series_id}, {start}-{end}")
         rows.extend(page)
     return rows
+
+
+def stored_base_months(signal_name: str) -> list[tuple[str, float, str]]:
+    """Return the latest stored BLS revision for each historical month."""
+    with connect() as db:
+        rows = db.execute("""SELECT r.observation_date, r.value, r.data_quality
+            FROM signal_records r JOIN signal_definitions d ON d.id=r.signal_uid
+            WHERE d.signal_id=? AND r.source_kind=?
+            ORDER BY r.observation_date, r.source_timestamp DESC, r.ingested_at DESC""",
+            (signal_name, SOURCE_KIND)).fetchall()
+    months: dict[str, tuple[str, float, str]] = {}
+    for row in rows:
+        day = row["observation_date"]
+        if day not in months:
+            quality = "preliminary" if "preliminary" in (row["data_quality"] or "") else "published"
+            months[day] = (day, row["value"], quality)
+    return [months[day] for day in sorted(months)]
 
 
 def parse_months(rows: list[dict]) -> list[tuple[str, float, str]]:
@@ -128,14 +147,43 @@ def derive_months(base_name: str, months: list[tuple[str, float, str]]) -> dict[
 
 def refresh_bls() -> dict:
     initialize()
-    started = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(timezone.utc)
+    # Enforce the public API quota at the adapter boundary too. The worker's
+    # normal scheduler has the same cooldown, but explicit --once runs can
+    # otherwise call every adapter and exhaust BLS's anonymous daily budget.
+    with connect() as db:
+        latest_attempt = db.execute("""SELECT MAX(COALESCE(finished_at, started_at))
+            AS attempted_at FROM refresh_runs WHERE source_name=?""",
+            (SOURCE_KIND,)).fetchone()["attempted_at"]
+    if latest_attempt:
+        try:
+            attempted_at = datetime.fromisoformat(latest_attempt)
+            if attempted_at.tzinfo is None:
+                attempted_at = attempted_at.replace(tzinfo=timezone.utc)
+            if now - attempted_at < BLS_REFRESH_INTERVAL:
+                return {"source": SOURCE_KIND, "status": "skipped",
+                        "reason": "seven_day_refresh_cooldown",
+                        "next_attempt_at": (attempted_at + BLS_REFRESH_INTERVAL).isoformat()}
+        except ValueError:
+            # An invalid legacy timestamp must not permanently disable refresh.
+            pass
+    started = now.isoformat()
     with connect() as db:
         run_id = db.execute("""INSERT INTO refresh_runs(source_name, started_at, status)
             VALUES (?, ?, 'running')""", (SOURCE_KIND, started)).lastrowid
     try:
         fetched: dict[str, list[tuple[str, float, str]]] = {}
         for signal_name, series_id in BLS_SERIES.items():
-            months = parse_months(fetch_series(series_id))
+            stored = stored_base_months(signal_name)
+            # The first run backfills history. Later runs request only the
+            # current and previous year, preserving older recorded months.
+            # This keeps the unregistered API's daily request budget intact.
+            start_year = (datetime.now(timezone.utc).year - 1
+                          if len(stored) >= 24 and stored[0][0] <= "2000-01-31"
+                          else 2000)
+            recent = parse_months(fetch_series(series_id, start_year=start_year))
+            months = sorted({day: (day, value, quality) for day, value, quality
+                             in (*stored, *recent)}.values())
             if not months:
                 raise ValueError(f"BLS has no valid monthly values for {series_id}")
             fetched.update(derive_months(signal_name, months))

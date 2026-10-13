@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Activity, ArrowRight, BarChart3, Check, ChevronRight, FileSpreadsheet, LockKeyhole, Loader2, PackageCheck, Sparkles } from 'lucide-react'
 import { isSignedIn, login, register } from '../api'
 import { unlockBrowserPlan } from '../browserForecast'
+import SiteHeader from '../components/SiteHeader'
 
 const features = [
   { icon: BarChart3, title: 'Forecast each medication', copy: 'A separate XGBoost model uses past sales and eligible dated public signals for each drug.' },
@@ -25,6 +26,11 @@ export default function LandingPage() {
   const navigate = useNavigate()
 
   useEffect(() => { isSignedIn().then(signedIn => { if (signedIn) navigate('/dashboard') }) }, [navigate])
+  useEffect(() => {
+    if (window.location.hash === '#access') {
+      document.getElementById('access')?.scrollIntoView({ block: 'center' })
+    }
+  }, [])
 
   function showAccess(nextMode: 'login' | 'signup') {
     setMode(nextMode)
@@ -49,22 +55,14 @@ export default function LandingPage() {
   }
 
   return <div id="top" className="min-h-screen overflow-x-hidden bg-paper font-sans text-ink">
-    <div className="border-b border-slate-200/80">
-      <div className="page-rail mx-auto max-w-[1060px] px-4 py-4 sm:px-8 sm:py-5">
-        <nav className="flex min-h-14 items-center justify-between gap-4 rounded-full border border-white bg-paper/90 px-4 shadow-[0_0_0_2px_white] backdrop-blur-sm sm:px-6" aria-label="Main navigation">
-          <a href="#top" className="flex items-center gap-2.5 text-lg font-medium tracking-tight text-slate-900"><span className="flex h-8 w-8 items-center justify-center rounded-full bg-ink text-white"><Activity className="h-4 w-4" /></span>PULSE</a>
-          <div className="hidden items-center gap-7 text-[13px] font-medium text-slate-600 sm:flex"><a className="hover:text-ink" href="/signals">Signals</a><a className="hover:text-ink" href="/api-guide">API guide</a><a className="hover:text-ink" href="#features">Features</a><a className="hover:text-ink" href="#how-it-works">How it works</a><a className="hover:text-ink" href="#questions">Questions</a></div>
-          <button onClick={() => showAccess('login')} className="rounded-full bg-white px-4 py-2 text-sm font-medium text-ink shadow-[0_1px_2px_rgba(55,50,47,0.12)] transition hover:bg-slate-100">Log in</button>
-        </nav>
-      </div>
-    </div>
+    <SiteHeader onLogin={() => showAccess('login')} />
 
     <main className="page-rail mx-auto max-w-[1060px]">
       <section className="grid gap-12 border-b border-slate-200 px-6 pb-16 pt-16 sm:px-10 sm:pt-20 lg:grid-cols-[minmax(0,1.15fr)_minmax(330px,0.85fr)] lg:items-center lg:gap-16 lg:px-14 lg:pb-24 lg:pt-28">
         <div>
           <span className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-1.5 text-xs font-medium text-slate-800 shadow-[0_0_0_4px_rgba(55,50,47,0.04)]"><span className="h-1.5 w-1.5 rounded-full bg-teal-600" /> A calmer way to plan replenishment</span>
           <h1 className="mt-7 max-w-[650px] font-serif text-[48px] font-normal leading-[1.02] tracking-[-0.025em] text-ink sm:text-[64px] lg:text-[76px]">A clearer pulse on pharmacy demand.</h1>
-          <p className="mt-7 max-w-[520px] text-base font-medium leading-relaxed text-slate-600 sm:text-lg">Turn your sales and inventory history into a focused 14-day plan—so you can see which medicines may need attention, and when.</p>
+          <p className="mt-7 max-w-[520px] text-base font-medium leading-relaxed text-slate-600 sm:text-lg">Turn your sales and inventory history into direct 1-, 7-, 14-, and 30-day forecasts and a focused replenishment plan.</p>
           <div className="mt-9 flex flex-wrap items-center gap-4"><button onClick={() => showAccess('signup')} className="dark-pill inline-flex h-12 items-center gap-3 px-7 text-sm font-medium">Create a workspace <ArrowRight className="h-4 w-4" /></button><a href="#how-it-works" className="inline-flex h-12 items-center gap-1 text-sm font-medium text-slate-700 hover:text-ink">See how it works <ChevronRight className="h-4 w-4" /></a></div>
           <p className="mt-7 flex items-center gap-2 text-xs text-slate-500"><Check className="h-4 w-4 text-teal-600" /> Separate models for each medication <span className="text-slate-300">·</span> Private files stay on this device</p>
         </div>

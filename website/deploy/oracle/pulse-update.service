@@ -1,0 +1,20 @@
+[Unit]
+Description=Update PULSE from its GitHub production branch
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+User=ubuntu
+Group=ubuntu
+SupplementaryGroups=docker
+WorkingDirectory=/opt/pulse
+ExecStart=/usr/bin/bash /opt/pulse/website/deploy/oracle/refresh_from_github.sh
+TimeoutStartSec=45min
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -15,6 +15,9 @@ import pandas as pd
 from xgboost import XGBRegressor
 
 
+HORIZONS = (1, 7, 14, 30)
+
+
 def _calendar_dates(values, label, *, optional=False):
     """Accept one unambiguous calendar-day format for private CSV inputs."""
     raw = values.astype("string").str.strip()
@@ -57,8 +60,8 @@ def _read_sales(csv_text, *, today=None):
         raise ValueError("Sales CSV has duplicate drug/date rows")
     frame = frame.sort_values(["drug_name", "date"])
     for drug, part in frame.groupby("drug_name"):
-        if len(part) < 130 or len(pd.date_range(part.date.min(), part.date.max())) != len(part):
-            raise ValueError(f"{drug} needs at least 130 consecutive daily rows")
+        if len(part) < 180 or len(pd.date_range(part.date.min(), part.date.max())) != len(part):
+            raise ValueError(f"{drug} needs at least 180 consecutive daily rows")
     return frame
 
 
@@ -99,21 +102,21 @@ def _read_inventory(csv_text, sales, *, today=None):
         if row.date != sales_end[row.drug_name]:
             raise ValueError(
                 f"{row.drug_name} latest inventory date must match its last sales date "
-                "so the 14-day plan starts from the same stock snapshot")
+                "so the plan starts from the same stock snapshot")
     for drug, sales_part in sales.groupby("drug_name"):
         inventory_part = frame[frame.drug_name.eq(drug)]
         aligned = pd.merge_asof(
             sales_part[["date"]].sort_values("date"),
             inventory_part[["date", "on_hand_units"]].sort_values("date"),
             on="date", direction="backward", tolerance=pd.Timedelta(days=1))
-        if aligned.on_hand_units.notna().sum() < 130:
+        if aligned.on_hand_units.notna().sum() < 180:
             raise ValueError(
-                f"{drug} needs inventory snapshots covering at least 130 sales days "
+                f"{drug} needs inventory snapshots covering at least 180 sales days "
                 "(same day or previous day) to train with inventory history")
     return frame, latest
 
 
-def _features(part):
+def _features(part, horizon=14):
     work = part.copy().sort_values("date").reset_index(drop=True)
     sales = work.units_sold.astype(float)
     for lag in (1, 2, 3, 7, 14, 21, 28, 56):
@@ -132,10 +135,10 @@ def _features(part):
     work["price_lag1"] = price.shift(1)
     work["stockout_lag1"] = stockout.shift(1)
     work["inventory_lag1"] = work.on_hand_units.shift(1)
-    work["target"] = sales.shift(-1).rolling(14, min_periods=14).sum().shift(-13)
+    work["target"] = sales.shift(-1).rolling(horizon, min_periods=horizon).sum().shift(1 - horizon)
     # Sales during a stockout are censored observations of demand. Exclude
-    # every training target whose following 14 days include a marked stockout.
-    work["target_stockout_days"] = stockout.shift(-1).rolling(14, min_periods=14).sum().shift(-13)
+    # every target whose following horizon includes a marked stockout.
+    work["target_stockout_days"] = stockout.shift(-1).rolling(horizon, min_periods=horizon).sum().shift(1 - horizon)
     columns = [name for name in work if name.startswith(("lag_", "mean_", "std_"))]
     columns += ["dow", "month", "weekofyear", "sin_year", "cos_year", "price_lag1", "stockout_lag1"]
     columns.append("inventory_lag1")
@@ -153,7 +156,9 @@ def _signal_series(rows, dates):
     """Use the latest period and revision known on each feature day."""
     by_id = {}
     for row in rows:
-        if row.get("ambiguous") or row.get("usable") is False or not row.get("source_timestamp"):
+        if (row.get("ambiguous") or row.get("usable") is False or
+                row.get("source_kind") == "article_text_ridge_shadow_v1" or
+                not row.get("source_timestamp")):
             continue
         source_time = pd.to_datetime(row["source_timestamp"], errors="coerce", utc=True)
         period_end = pd.to_datetime(row["observation_date"], errors="coerce", utc=True)
@@ -168,6 +173,10 @@ def _signal_series(rows, dates):
         source_time = source_time.tz_convert(None)
         period_end = period_end.tz_convert(None).normalize()
         available = max(source_time.normalize(), period_end)
+        if row.get("forecast_horizon") and period_end > source_time.normalize():
+            # A live model estimate targets a future observation period but is
+            # available to a forecast as soon as its source timestamp exists.
+            available = source_time.normalize()
         by_id.setdefault(row["id"], []).append((available, period_end, source_time, value))
     output = {}
     for uid, events in by_id.items():
@@ -190,12 +199,18 @@ def _signal_series(rows, dates):
     return output
 
 
-def _plan_quantities(direct_14, weights, trailing, latest, dates):
+def _plan_quantities(direct, weights, trailing, latest, dates):
     """Credit inbound stock only after its dated arrival, never immediately."""
     weights = np.asarray(weights, dtype=float)
-    if weights.sum() <= 0:
-        weights = np.ones(14)
-    daily = direct_14 * weights / weights.sum()
+    anchors = {0: 0.0}
+    for horizon in HORIZONS:
+        anchors[horizon] = max(anchors[max(anchors)], float(direct[horizon]), 0.0)
+    daily = np.zeros(14)
+    for start, end in ((0, 1), (1, 7), (7, 14)):
+        segment = np.maximum(weights[start:end], 0)
+        if segment.sum() <= 0:
+            segment = np.ones(end - start)
+        daily[start:end] = (anchors[end] - anchors[start]) * segment / segment.sum()
     cumulative = np.cumsum(daily)
     on_hand = float(latest.on_hand_units)
     on_order = float(latest.on_order_units)
@@ -207,22 +222,85 @@ def _plan_quantities(direct_14, weights, trailing, latest, dates):
     minimums = [max(0, math.ceil(float(deficits[:horizon].max()) - 1e-9))
                 for horizon in (1, 7, 14)]
     safety = math.ceil(1.65 * float(trailing.std(ddof=0)) * math.sqrt(7))
-    target_stock = math.ceil(max(direct_14, float(trailing.mean()) * 14) + safety)
+    target_stock = math.ceil(max(anchors[14], float(trailing.mean()) * 14) + safety)
     recommended = max(minimums[-1], math.ceil(target_stock - on_hand - inbound[-1]), 0)
     depleted = np.flatnonzero(deficits > 1e-9)
     return {"on_hand_units": on_hand, "on_order_units": on_order,
             "expected_arrival_date": arrival.date().isoformat() if pd.notna(arrival) else None,
             "incoming_eta_overdue": overdue,
             "incoming_counted_by_day_14": bool(inbound[-1] > 0),
-            "forecast_1d_units": round(float(cumulative[0]), 2),
-            "forecast_7d_units": round(float(cumulative[6]), 2),
-            "forecast_14d_units": round(float(cumulative[-1]), 2),
+            "forecast_1d_units": round(anchors[1], 2),
+            "forecast_7d_units": round(anchors[7], 2),
+            "forecast_14d_units": round(anchors[14], 2),
+            "forecast_30d_units": round(anchors[30], 2),
             "days_until_stockout": int(depleted[0] + 1) if len(depleted) else None,
             "minimum_buy_1d_units": minimums[0],
             "minimum_buy_7d_units": minimums[1],
             "minimum_buy_14d_units": minimums[2],
             "recommended_order_units": recommended,
             "inventory_status": "reorder_now" if minimums[1] > 0 else "reorder_soon" if recommended > 0 else "covered"}
+
+
+def _fit_horizon(part, horizon, signals):
+    work, base_columns = _features(part, horizon)
+    usable = work.dropna(subset=base_columns + ["target"])
+    usable = usable[usable.target_stockout_days.eq(0)].copy()
+    if len(usable) < 60:
+        raise ValueError(f"{part.drug_name.iloc[0]} has too few uncensored {horizon}-day targets")
+    cutoff = usable.date.iloc[int(len(usable) * .8)]
+    train_mask = usable.date < cutoff - timedelta(days=horizon)
+    holdout_mask = usable.date >= cutoff
+    if train_mask.sum() < 30 or holdout_mask.sum() < 10:
+        raise ValueError(f"{part.drug_name.iloc[0]} needs more history for a purged {horizon}-day validation split")
+    scored = []
+    for uid, values in signals.items():
+        lagged = pd.Series(values).shift(1).fillna(0)
+        x = lagged.loc[usable.index].to_numpy(float)
+        if np.std(x[train_mask.to_numpy()]) <= 1e-12:
+            continue
+        correlation = np.corrcoef(x[train_mask.to_numpy()], usable.loc[train_mask, "target"])[0, 1]
+        if np.isfinite(correlation):
+            scored.append((abs(float(correlation)), uid, values, x[train_mask.to_numpy()].tobytes()))
+    scored.sort(key=lambda item: (-item[0], item[1]))
+    selected = []
+    vectors = set()
+    for _, uid, values, vector in scored:
+        if vector in vectors:
+            continue
+        vectors.add(vector)
+        selected.append((uid, values))
+        if len(selected) == 5:
+            break
+    columns = base_columns.copy()
+    if len(selected) == 5:
+        for index, (_, values) in enumerate(selected):
+            for lag in (1, 7, 14):
+                name = f"signal_{index}_lag_{lag}"
+                work[name] = pd.Series(values).shift(lag).fillna(0)
+                columns.append(name)
+    else:
+        selected = []
+    usable = work.loc[usable.index]
+    train_rows = usable.loc[train_mask]
+    holdout = usable.loc[holdout_mask]
+    actual = holdout.target.to_numpy(float)
+    denominator = max(actual.sum(), 1e-9)
+    sales_model = _new_model().fit(train_rows[base_columns], train_rows.target)
+    sales_wape = float(np.abs(actual - np.maximum(sales_model.predict(holdout[base_columns]), 0)).sum() / denominator)
+    chosen_columns = base_columns
+    chosen_wape = sales_wape
+    if selected:
+        signal_model = _new_model().fit(train_rows[columns], train_rows.target)
+        signal_wape = float(np.abs(actual - np.maximum(signal_model.predict(holdout[columns]), 0)).sum() / denominator)
+        if signal_wape + 1e-6 < sales_wape:
+            chosen_columns = columns
+            chosen_wape = signal_wape
+        else:
+            selected = []
+    final = _new_model().fit(usable[chosen_columns], usable.target)
+    forecast = max(0.0, float(final.predict(work.iloc[[-1]][chosen_columns])[0]))
+    return forecast, {"wape": chosen_wape, "private_only_wape": sales_wape,
+                      "signals_used": [uid for uid, _ in selected]}
 
 
 def train(payload_json):
@@ -242,58 +320,15 @@ def train(payload_json):
         part = pd.merge_asof(part.sort_values("date"),
                              inventory_part[["date", "on_hand_units"]].sort_values("date"),
                              on="date", direction="backward", tolerance=pd.Timedelta(days=1))
-        work, columns = _features(part)
-        usable = work.dropna(subset=columns + ["target"]).copy()
-        usable = usable[usable.target_stockout_days.eq(0)].copy()
-        if usable.empty:
-            raise ValueError(f"{drug} has no uncensored 14-day training targets; add more non-stockout history")
-        base_columns = columns.copy()
-        cutoff = usable.date.iloc[int(len(usable) * .8)]
-        selected = []
+        signals = {}
         if signal_years:
             earliest = part.date.max() - pd.DateOffset(years=signal_years)
-            eligible_rows = [row for row in signal_rows if pd.to_datetime(row["observation_date"]) >= earliest]
-            signals = _signal_series(eligible_rows, work.date)
-            scored = []
-            for uid, values in signals.items():
-                lagged = pd.Series(values).shift(1)
-                x = lagged.loc[usable.index].to_numpy(float)
-                training_mask = (usable.date <= cutoff - timedelta(days=14)).to_numpy() & np.isfinite(x)
-                if training_mask.sum() >= 30 and np.std(x[training_mask]) > 1e-12:
-                    correlation = np.corrcoef(x[training_mask], usable.loc[training_mask, "target"])[0, 1]
-                    if np.isfinite(correlation):
-                        scored.append((abs(float(correlation)), uid, values))
-            scored.sort(key=lambda item: (-item[0], item[1]))
-            for _, uid, values in scored[:5]:
-                for lag in (1, 7, 14):
-                    column = f"signal_{uid}_lag{lag}"
-                    work[column] = pd.Series(values).shift(lag)
-                    columns.append(column)
-                selected.append(uid)
-            usable = work.dropna(subset=base_columns + ["target"]).copy()
-            usable = usable[usable.target_stockout_days.eq(0)].copy()
-        train_rows = usable[usable.date <= cutoff - timedelta(days=14)]
-        holdout = usable[usable.date >= cutoff]
-        if len(train_rows) < 30 or holdout.empty:
-            raise ValueError(f"{drug} needs more history for a purged validation split")
-        actual = holdout.target.to_numpy(float)
-        denominator = max(np.abs(actual).sum(), 1e-9)
-        private_model = _new_model().fit(train_rows[base_columns], train_rows.target)
-        private_predicted = np.maximum(private_model.predict(holdout[base_columns]), 0)
-        private_wape = float(np.abs(actual - private_predicted).sum() / denominator)
-        wape = private_wape
-        if selected:
-            signal_model = _new_model().fit(train_rows[columns], train_rows.target)
-            signal_predicted = np.maximum(signal_model.predict(holdout[columns]), 0)
-            signal_wape = float(np.abs(actual - signal_predicted).sum() / denominator)
-            if signal_wape + 1e-6 < private_wape:
-                wape = signal_wape
-            else:
-                columns = base_columns
-                selected = []
-        final = _new_model().fit(usable[columns], usable.target)
-        current = work.iloc[[-1]][columns]
-        direct_14 = max(0.0, float(final.predict(current)[0]))
+            eligible = [row for row in signal_rows if pd.to_datetime(row["observation_date"]) >= earliest]
+            signals = _signal_series(eligible, part.date)
+        direct = {}
+        by_horizon = {}
+        for horizon in HORIZONS:
+            direct[horizon], by_horizon[str(horizon)] = _fit_horizon(part, horizon, signals)
         recent = part.tail(56)
         weekday_means = recent.groupby(recent.date.dt.dayofweek).units_sold.mean()
         dates = [part.date.max() + timedelta(days=i) for i in range(1, 15)]
@@ -301,15 +336,17 @@ def train(payload_json):
         latest = inventory[inventory.drug_name.eq(drug)].iloc[0]
         trailing = recent.tail(28).units_sold.astype(float)
         plans.append({"drug_name": drug, "as_of_date": latest.date.date().isoformat(),
-                      **_plan_quantities(direct_14, weights, trailing, latest, dates)})
-        results.append({"drug_name": drug, "wape": wape,
-                        "private_only_wape": private_wape, "signals_used": selected})
+                      **_plan_quantities(direct, weights, trailing, latest, dates)})
+        results.append({"drug_name": drug, "by_horizon": by_horizon,
+                        "wape": by_horizon["14"]["wape"],
+                        "private_only_wape": by_horizon["14"]["private_only_wape"],
+                        "signals_used": by_horizon["14"]["signals_used"]})
     plans.sort(key=lambda row: (-row["recommended_order_units"], row["drug_name"]))
     return json.dumps({"items": plans, "per_drug": results,
                        "history_start": sales.date.min().date().isoformat(),
                        "history_end": sales.date.max().date().isoformat(),
-                       "signal_years": signal_years, "model": "browser_xgboost_direct_14d_v6",
-                       "note": "Private files stayed in this browser. Fourteen-day training targets that included a marked stockout were excluded. Public signals with unknown or later retrieval timestamps were excluded, and eligible signals were kept only when they improved purged holdout error. Incoming stock was credited only after its dated arrival."})
+                       "signal_years": signal_years, "model": "browser_xgboost_direct_multihorizon_v7",
+                       "note": "Private files stayed in this browser. Separate 1-, 7-, 14-, and 30-day unit totals were trained. Targets containing marked stockouts were excluded. Public signals with unknown or later retrieval timestamps were excluded, and exactly five distinct eligible signals were considered per drug and horizon. Signals were used only when they improved purged holdout error. Inconsistent cumulative horizons were raised to the preceding horizon for planning; daily amounts within the longer windows are allocations. Incoming stock was credited only after its dated arrival."})
 
 
 if "payload" in globals():

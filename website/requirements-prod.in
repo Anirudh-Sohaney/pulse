@@ -1,5 +1,6 @@
 # API, refresh worker, and backup/restore runtime on Python 3.14.
-# Browser XGBoost is vendored by the frontend build; legacy server training is disabled.
+# The backend uses XGBoost only for the checked-in daily inference artifact.
+# Pharmacy CSV training remains in the user's browser.
 fastapi==0.139.2
 uvicorn==0.51.0
 pydantic==2.13.4
@@ -10,6 +11,8 @@ bcrypt==5.0.0
 argon2-cffi==25.1.0
 pandas==2.3.3
 numpy==2.5.1
+scipy==1.18.0
+xgboost-cpu==3.4.1
 python-dotenv==1.2.2
 # Restore rehearsal runs the ASGI app against a copied snapshot.
 httpx==0.28.1

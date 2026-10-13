@@ -1,11 +1,25 @@
 # Model rebuild progress
 
-**Last updated:** 2026-10-09  
-**Status:** Local synthetic proof of concept is runnable. Article-text 20-signal inference is wired to the backend as a quarantined shadow path; real-world production validation is outstanding.
+**Last updated:** 2026-10-11
+**Status:** Multi-horizon synthetic XGBoost artifacts are saved under `model/trained/synthetic_horizon_xgb_v1/`. Article-text 20-signal inference remains a quarantined shadow path; real-world production validation is outstanding.
 
 ## Current result
 
-The local demand forecaster predicts 14-day unit totals for 30 synthetic drug series from sales history and dated catalog signals. The catalog has 1,312 signal columns. The default saved recipe is the fixed historical top-five signal approach, rebuilt with a 14-day purge between training labels and the test period.
+The new trainer evaluates direct next-1/7/14/30-day recorded-unit totals for
+all 30 synthetic drugs. Each drug/horizon uses five training-selected distinct
+signals and compares matched sales-only XGBoost. On the untouched final
+period, pooled signal-versus-sales-only WAPE is 42.34%/43.57% for 1 day,
+29.69%/28.66% for 7 days, 30.66%/30.02% for 14 days, and 30.72%/32.70% for
+30 days. Validation-selected use of signals yields 42.30%, 29.54%, 30.66%,
+and 28.85% respectively. The one-day and 30-day signal arms improve pooled
+WAPE; the seven-day and fourteen-day arms do not. The signal archive does not
+preserve publication vintages, so this period-end-based historical replay is
+not a point-in-time operational validation. Full protocol and scores are in
+[`../comparison.md`](../comparison.md).
+
+The earlier 14-day result below is retained as a separate fixed-recipe study.
+
+The earlier local demand forecaster predicted 14-day unit totals for 30 synthetic drug series from sales history and dated catalog signals. The catalog has 1,312 signal columns. Its fixed historical top-five recipe was rebuilt with a 14-day purge between training labels and the test period.
 
 | Evaluation | Signal model | Matched sales-only | Result |
 |---|---:|---:|---|
@@ -18,6 +32,8 @@ The purged historical recipe closely reproduces the earlier synthetic result of 
 
 ## Work completed
 
+- On 2026-10-11, added and ran `arkansas_pharma_signal/synthetic_horizon_xgb.py` over 30 drugs and four direct future-unit windows. Saved 240 checksum-pinned XGBoost boosters, one manifest with five selected signal identities and scores for each drug/horizon, a command-line trainer, and a held-out synthetic replay command. Verified 120 drug/horizon rows, five distinct signals in each, loadability/checksums of every booster, and replay inference for both sales-only and signal-selected models.
+
 - On 2026-10-09, corrected the separate annual city/drug model's blend calibration in `arkansas_pharma_signal/cli.py`. The old training command used a full-data ridge to select its last-year validation weight, leaking those labels. The new command freezes identity categories before the validation feature year and selects the weight from a ridge fit on prior years only. On the local 544,070-row 2013–2024 panel, the corrected 2023 feature-year validation chose ridge weight 0.00 at WAPE 0.14846; the old 0.70 weight and 0.14609 score were contaminated. The regenerated artifact still fails the operational input gate for 56 source variables. This calibration repair does not validate source release timing or make the annual model live-ready.
 
 - Inspected current model code, local archived outputs, synthetic benchmark procedures, and reachable Git history. The history shows downstream code consuming the 20 monthly outputs, but no recovered upstream FLAN-T5 inference runner or matching checkpoint.
@@ -29,7 +45,15 @@ The purged historical recipe closely reproduces the earlier synthetic result of 
 - Kept the validation-selected grid winner separate from the fixed historical recipe. Both model sets have saved weights, feature manifests, and a selectable local inference path.
 - Verified Python compilation, report regeneration, and local inference for both demand recipes. Each inference run emitted 30 forecasts. `git diff --check` passed at the last code review.
 
-## Main artifacts
+> **Historical status:** The `model/rebuilt_demand/` source directory listed
+> below was removed in commit `77c9427`. These links describe artifacts from
+> that earlier workspace and are not executable in the current checkout.
+> Current reproducible paths include `model/scripts/train_synthetic_horizon_xgb.py`,
+> `data/synthetic_pharmacy_data/evaluate_current_benchmark.py`,
+> `model/scripts/evaluate_synthetic_event_windows.py`, and
+> `model/scripts/evaluate_cms_partd_news.py`.
+
+## Historical artifacts
 
 - Training and report generation: [`../rebuilt_demand/train.py`](../rebuilt_demand/train.py)
 - Local demand inference: [`../rebuilt_demand/predict.py`](../rebuilt_demand/predict.py)

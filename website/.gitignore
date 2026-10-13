@@ -21,6 +21,7 @@ data/signals.sqlite3*
 data/.jwt_secret
 data/.refresh_worker.lock
 data/backups/
+data/*.log
 data/cms_partd_claims.*.csv.gz
 data/cms_partd_claims.csv.gz
 data/cms_partd_source_manifest.json

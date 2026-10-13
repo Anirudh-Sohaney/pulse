@@ -100,7 +100,7 @@ def verify_backup(directory: Path) -> dict:
                 if has_runs:
                     run = db.execute("""SELECT source_sha256, source_year
                         FROM demand_forecast_runs
-                        WHERE method='cms_partd_two_year_persistence_v2'
+                        WHERE method='cms_partd_two_year_tiered_v4'
                         ORDER BY target_year DESC, created_at DESC LIMIT 1""").fetchone()
                     if run and not extras:
                         raise ValueError("Backup ranking has no committed CMS source pair")

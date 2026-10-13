@@ -111,13 +111,15 @@ def run(base_url: str, signal_years: int = 0,
                         base_url.rstrip("/") + "/api/v1/signals/catalog?limit=1500")
                     assert catalog_response.status == 200
                     catalog = {row["id"]: row for row in catalog_response.json()["signals"]}
+                    requested_origins = set()
                     for query in history_queries:
                         for uid in query["ids"]:
                             row = catalog[uid]
                             assert row["latest_observation_date"] >= query["start_date"]
-                            assert row["signal_origin"] != "model_news_output"
+                            requested_origins.add(row["signal_origin"])
                             assert not row["signal_id"].startswith(
                                 "arkansas_atc_demand_state::")
+                    assert "model_news_output" in requested_origins
                     if simulate_rate_limit:
                         assert injected_limit[0] and signal_history_statuses.count(429) == 1
                     assert all(status in (200, 429) for status in signal_history_statuses), signal_history_statuses
@@ -195,9 +197,8 @@ def run(base_url: str, signal_years: int = 0,
                     security_page = security_context.new_page()
                     security_page.goto(base_url.rstrip("/") + "/dashboard",
                                        wait_until="domcontentloaded")
-                    security_page.get_by_role("button", name="Sign out everywhere").wait_for()
-                    security_page.get_by_role("button", name="Sign out everywhere").evaluate(
-                        "button => button.click()")
+                    security_page.get_by_text("Account", exact=True).click()
+                    security_page.get_by_role("button", name="Sign out everywhere").click()
                     expect(security_page).to_have_url(base_url.rstrip("/") + "/", timeout=10000)
                     assert security_context.request.get(
                         base_url.rstrip("/") + "/api/auth/me").status == 401

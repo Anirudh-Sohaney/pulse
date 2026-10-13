@@ -16,7 +16,7 @@ from pathlib import Path
 
 from backend.backup_worker import latest_verified_backup
 from backend.config import settings
-from backend.signal_store import freshness
+from backend.signal_store import freshness, is_non_blocking_refresh_source
 from backend.worker import REFRESH_TASKS, most_recent_schedule
 from scripts.backup_databases import verify_backup
 from scripts.encrypted_backup import load_key, verify_encrypted
@@ -38,7 +38,10 @@ def sources_status(now: datetime | None = None) -> dict:
     state = freshness()
     checks = state["source_checks"]
     failed = state["failed_sources"]
-    expected = {name for _, names in REFRESH_TASKS for name in names}
+    # Optional monthly enrichments are not part of the daily service-health
+    # contract. BLS is deliberately polled weekly to respect the public quota.
+    expected = {name for _, names in REFRESH_TASKS for name in names
+                if not is_non_blocking_refresh_source(name)}
     observed = {row["source_name"] for row in checks}
     missing = sorted(expected - observed)
     cutoff = most_recent_schedule(now or datetime.now(timezone.utc))

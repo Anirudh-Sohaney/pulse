@@ -8,14 +8,20 @@ for a public launch.
 
 The checked-in seed manifest now has **1,250 IDs**: 1,212 CMS Part D demand
 outputs, 18 legacy ATC outputs, and 20 archived news outputs. After the local
-source refresh, the catalog has **1,480 IDs** and 30,621 records. The latest
-non-shadow source period is 2026-10-03. The evaluated CMS baseline serves
-1,324 drug rankings for target year 2026 from 2024 source claims. The 20
-article-text estimates remain shadow-only and the 18 legacy ATC outputs remain
-unusable. The saved research artifact under `model/` is not a live backend
-checkpoint. BLS hit its public daily request cap during repeated manual tests;
-its prior captured observations remain available and the failed check is
-visible through `/freshness`.
+source refresh, the internal historical catalog has **1,480 IDs** and 32,368
+records. The latest non-shadow source period is 2026-10-03. The current
+publication scope contains **1,018** selected drug projections plus 20 archived
+news IDs, whose live article estimates remain shadow-only. The 18 legacy ATC
+outputs and 194 unselected seeded drug outputs are retained as history and
+excluded from current coverage. The selected drug projections target 2026
+from 2024 source claims. The saved research artifact under `model/` is not a live backend
+checkpoint. Repeated BLS requests exhausted the public daily quota. The
+worker's explicit `--once` mode bypassed its scheduled cooldown, so a run-level
+cooldown now also guards the adapter itself. BLS is optional monthly context,
+refreshed at most weekly through every invocation path. Failures are retained
+in per-source diagnostics but excluded from general signal warnings; failed
+fetches write no partial BLS update and do not affect other source families or
+the drug ranking.
 
 This section supersedes earlier operational counts in the dated log below.
 Those entries preserve the history of the previous 1,312-ID manifest and
@@ -27,7 +33,7 @@ enforcement window dates, and shadow article provenance. It does not currently
 recompute every live source row hash, so older claims of that check below are
 historical rather than a current release guarantee.
 
-The current website suite passed 87 tests, frontend lint and build passed,
+The current website suite passed 88 tests, frontend lint and build passed,
 and the isolated built-browser smoke passed with three years of signal history
 and an injected 429 retry. A broader `model/tests` run passed 354 tests and
 failed 26. Several failures are blocked by local Git LFS pointer files rather
@@ -35,16 +41,72 @@ than hydrated research datasets (including the publishable test suite);
 others refer to missing or stale evaluation artifacts. Those model gates are
 not satisfied, and the saved research model must remain outside the live API.
 
-The read-only live API audit passed across all 1,480 catalog IDs, 1,442 usable
-latest values, nine representative source histories, and all 1,324 ranked
-drugs. It confirmed that 20 article outputs and 18 ATC outputs have no usable
-latest value. Run it from `website/` with
+The read-only live API audit passed across all 1,480 historical catalog IDs,
+1,136 usable latest IDs, and 1,018 ranked drugs after the tiered publication
+change. It confirmed that the 20 article outputs and 18 legacy ATC outputs
+have no usable latest value. Run it from `website/` with
 `python -m scripts.audit_live_signal_api --require-source-refresh --require-drug-baseline`.
 The `model/README.md` also describes a `model/rebuilt_demand/` retraining
 workflow whose source directory is absent from this checkout and local HEAD.
 Its earlier experimental source exists in reachable local Git history, but
 the documented commands cannot run from this checkout as written. The
 backend's checksum-pinned article inference artifact is present.
+
+### Short-horizon XGBoost boundary (2026-10-11)
+
+The prior public daily outlook used frozen 2025 synthetic sales features in a
+2026 inference run. It could not represent current pharmacy demand, so the
+worker no longer schedules it and `GET /api/v1/signals/demand/outlook`
+returns HTTP 410. Its prior dated rows are retained only as historical
+research records. The new `GET /api/v1/signals/demand/horizon-study` route
+publishes held-out scores and selected signal IDs from the 30-drug synthetic
+next-1/7/14/30-day XGBoost comparison. It returns no live pharmacy forecasts.
+
+The private browser planner now trains separate targets for those four
+windows on a user's own sales and inventory history, compares eligible
+five-signal models against sales-only on a purged holdout, and keeps private
+files on the device. Its results remain demonstration forecasts requiring
+local validation before use in purchasing.
+
+### Current drug publication rule
+
+The broad `cms_partd_two_year_persistence_v2` and the stricter 729-drug
+`cms_partd_two_year_consistency_v3` runs remain archived. The current
+`cms_partd_two_year_tiered_v4` run retains those 729 drugs as
+`high_history`: each matched its relative state in the 2019, 2020, and
+2021 feature-year folds. It adds 289 `stable_far_from_cutoff` drugs: their
+2023 and 2024 claim states agree and their 2024 claims are at least 0.25
+log units from each state cutoff. Every API drug row carries its evidence
+tier. A retrospective 2021 validation fold included 912 selected drugs with
+89.7% balanced accuracy. The later 2022 fold included 905 with 88.4%
+balanced accuracy; the 176 added-tier drugs in that fold achieved 77.3%
+exact state accuracy on their own. These retrospective checks informed the
+publication policy, so they are not an untouched final evaluation. The
+four-fold 84.2% balanced accuracy describes the broad baseline before
+selection. This qualification is about annual relative claims categories;
+it does not validate inventory or purchasing outcomes. If a future release
+yields no qualifying drugs, more than 1,200, or less than 85% balanced
+accuracy on the later fold, the refresh fails closed and retains the prior
+ranking.
+
+The 20 historical news columns were intermediate features in the earlier
+1,324-drug research model, which is not the current ranking path. Across all
+97 archived months, `national_policy_risk` equals
+`national_policy_direction`, and `national_supply_chain_risk` equals
+`national_supply_stage_direction`: there are 20 named outputs but 18 distinct
+historical series. The article artifact preserves all 20 names and checks both
+alias pairs for consistency. The refresh also rejects values outside each
+signal's 97-month archived range. Its generated values remain marked unusable
+as direct observations; the daily XGBoost and pharmacy models use current
+generated values as features beginning at their recorded source timestamps.
+
+The five FDA enforcement IDs now use `rolling_30d` cadence because their
+observation date is the FDA update date for a trailing 30-day report window,
+which can fall on any weekday. Schema migration 4 replaced their former
+`weekly` IDs while preserving the five counts, September 30 source period,
+source snapshots, and 30,621 total records. Clients should rediscover these
+IDs through `/catalog`. The pre-migration SQLite backup is
+`website/data/backups/pre_enforcement_cadence_2026-10-10.sqlite3`.
 
 The root `.github/workflows/ci.yml` is configured to run the complete backend test suite,
 frontend lint/typecheck/build and runtime dependency audit, and a Compose smoke
@@ -113,9 +175,9 @@ failure and the worker waits until both that deadline and the 24-hour minimum
 cooldown have passed. A transient DNS lookup failure gets a 30-minute retry
 delay; other source failures keep the six-hour cooldown. FDA
 successes remain visible even when GDELT is rate limited.
-It checks for failed sources every 15 minutes; the
-unregistered BLS adapter waits until the next daily schedule so a partial
-failure cannot exhaust its 25-query daily allowance.
+It checks for failed sources every 15 minutes. BLS is checked at most weekly,
+and its adapter independently enforces that interval so explicit `--once`
+runs cannot bypass the public API quota guard.
 When a qualifying article version from the current or preceding UTC month is
 captured after the 20-signal shadow job last succeeded, the worker schedules
 another model run at its next 15-minute check. New article evidence also
@@ -379,6 +441,8 @@ most recent refresh failed. The worker report lists those sources without
 conflating an external outage with a stalled worker. These probes expose
 failures to the container runtime; route unhealthy-container and failed-source
 events to the chosen host's alert service before a public launch.
+Optional sources polled less often than daily, including BLS, are excluded from
+this daily health gate; their adapter failures do not affect signal coverage.
 When `ENVIRONMENT=production`, startup requires a nontrivial signing key of at
 least 32 bytes, secure cookies, a bounded session lifetime, disabled legacy
 server training, `PUBLIC_ORIGIN` set to the exact external HTTPS origin, and
@@ -426,8 +490,8 @@ keys:
 | Influenza-like illness context | Delphi FluView ILINet V5 weekly Arkansas ILI, national ILI, and national weighted ILI | Public anonymous access works locally; an optional Delphi API token removes anonymous rate limits. These are surveillance percentages, not demand outputs. |
 | Notifiable disease context | CDC NNDSS provisional weekly table for the six saved model disease labels, with Arkansas and U.S. rows | Public CDC Socrata access works locally without a key. Missing or suppressed metric cells remain absent. The four CDC measures are stored separately and are not yet the saved model's annual features. |
 | Wastewater context | CDC site-level WVAL dataset, aggregated as a transparent reporting-site mean for Arkansas and the U.S. | Public CDC Socrata access works locally without a key. Each value includes its contributing-site count; these means are not CDC's official geographic medians or validated live inputs for the saved demand model. |
-| Archived 20-output news estimate | Local TF-IDF/Ridge shadow model prefers captured titles and summaries for the last closed UTC month, and falls back to a current-month-to-date estimate targeted at month end. Its JSON weights are SHA-256 pinned. Results are stored with `usable: false`; it does not drive the drug ranking or purchasing dashboard. | No key; requires captured article text. |
-| Labor and price context | BLS Public Data API v1; CMS NADAC download | Public; no key configured. The worker currently makes fewer than the documented unregistered BLS daily request budget. |
+| Archived 20-output news estimate | Local TF-IDF/Ridge model prefers captured titles and summaries for the last closed UTC month, and falls back to a current-month-to-date estimate targeted at month end. Its JSON weights are SHA-256 pinned. Results are stored with `usable: false` as direct observations and may enter XGBoost forecasts as source-timestamped features. | No key; requires captured article text. |
+| Labor and price context | BLS Public Data API v1; CMS NADAC download | Public; no key configured. BLS checks run at most weekly because its observations are monthly and its anonymous endpoint has a strict daily quota. An adapter failure preserves prior observations and does not affect general signal coverage or ranking. |
 | Arkansas public demand and context | CMS Part D catalog/source, CMS Geographic Variation API, Medicaid State Performance API, Arkansas SDUD downloads, and HHS NDC release catalog | Public; no key configured. The Part D source is checksum- and manifest-validated before the daily projection is published. |
 
 The production deployment still needs operator-managed secrets for session
@@ -443,11 +507,11 @@ falling back to a current-month-to-date estimate targeted at month end when
 the closed month has no captured text. This is not the original model: it was
 fit on ten matched article months, and its live summary-text inputs differ
 from the archived full-text training corpus. Its rows are stored with
-`usable: false`; the 20 news outputs and downstream
-ATC-derived rows remain excluded from operational latest demand until the
-input distribution and chronological promotion checks pass. No key is needed
-for the currently configured public feeds. Do not treat the shadow outputs as
-observed claims or purchase guidance.
+`usable: false` as direct observations and are excluded from the current
+private demand trainer.
+The old ATC-derived rows remain excluded from operational latest demand. No key
+is needed for the currently configured public feeds. They remain model
+estimates rather than observed article or pharmacy measurements.
 
 Each shadow output now has database provenance in
 `news_model_record_provenance` and `news_model_record_inputs`: the model artifact
@@ -831,7 +895,7 @@ remain explicitly unusable and must not be treated as observations.
 | [FDA MedWatch RSS](https://www.fda.gov/safety/medwatch-fda-safety-information-and-adverse-event-reporting-program/medwatch-rss-feed) | Checked independently for drug-keyword safety alerts. Device-only paths and items without drug terms are excluded; an empty three-day window stays empty. The RSS date is the feed item date, not a demand observation. | No key. |
 | [FDA Recalls RSS](https://www.fda.gov/about-fda/contact-fda/subscribe-podcasts-and-news-feeds) | Checked independently for recent drug-related recall notices. Food-only notices are excluded. The RSS date is the feed item date, not a demand observation. | No key. |
 | [FDA Press Releases RSS](https://www.fda.gov/about-fda/contact-fda/subscribe-podcasts-and-news-feeds) | Checked independently for recent drug-related announcements. Device-only and general regulatory releases are excluded. The RSS date is the feed item date, not a demand observation. | No key. |
-| [BLS Public Data API](https://www.bls.gov/developers/api_faqs.htm) | Daily poll of three published monthly series through unregistered v1; records source months and preliminary flags, and derives the catalog's preceding-observation lags, differences, rolling values, and same-month historical baselines/anomalies. The first retrieval time is stored because the response omits a publication timestamp. | No key for v1. The current three-series history refresh uses nine queries per daily run, within its 25-query/day limit; registered v2 has higher limits but is not used. |
+| [BLS Public Data API](https://www.bls.gov/developers/api_faqs.htm) | Weekly poll of three published monthly series through unregistered v1; records source months and preliminary flags, and derives the catalog's preceding-observation lags, differences, rolling values, and same-month historical baselines/anomalies. The first retrieval time is stored because the response omits a publication timestamp. Failed refreshes write no partial BLS update and are omitted from general signal warnings. | No key for v1. The initial history backfill uses nine queries; later refreshes use three. A seven-day adapter cooldown protects every invocation path. |
 | [Medicaid and CHIP enrollment and performance](https://data.medicaid.gov/dataset/6165f45b-ca93-5bb5-9d06-db29c692a360) | Daily poll of eight Arkansas monthly measures via the official data API. Preliminary and final revisions are distinguished; absent cells are skipped. The first retrieval time is stored because the row publication timestamp is unavailable. | No key for the public data API. |
 | [CMS Medicare Geographic Variation](https://data.cms.gov/summary-statistics-on-use-and-payments/medicare-geographic-comparisons/medicare-geographic-variation-by-national-state-county) | Daily check of nine national annual catalog measures. The latest official year is 2024 as of this check; no 2025 or 2026 value is inferred. | Public data API, no key. |
 | [NADAC 2026](https://data.medicaid.gov/dataset/fbb83258-11c7-47f5-8b18-5f8e79f7e704) | Daily full latest-date snapshot; computes rate counts and min/mean/max within each rate classification and pricing unit. It does not publish to four legacy IDs with collapsed dimensions. | No key for the public data API. Annual dataset ID rollover must be checked before 2027. |
@@ -936,12 +1000,14 @@ Sales and inventory CSVs are read by a Web Worker in the browser and trained the
 the pinned Pyodide XGBoost runtime. The frontend build vendors Pyodide 0.29.4
 and its 12 locked package wheels, verifies each wheel against Pyodide's SHA-256
 lockfile, and serves the runtime from the app's origin. Chromium training
-succeeded with every outside-host request blocked. The 14-day per-drug model uses a purged
-validation split, and public signals are eligible only when their recorded
-source timestamp is no later than the feature date. Older catalog rows with
-unknown or later retrieval times are excluded. Lagged dated inventory is a
+succeeded with every outside-host request blocked. The current per-drug models
+fit separate 1-, 7-, 14-, and 30-day targets using purged validation splits.
+Public signals are eligible only when their recorded
+source timestamp is no later than the feature date. Unusable article shadow
+values and older catalog rows with unknown or later retrieval times are
+excluded. Lagged dated inventory is a
 required model feature; the latest balance drives the replenishment calculation.
-When the sales CSV supplies `stockout_flag`, every 14-day training target
+When the sales CSV supplies `stockout_flag`, every training target
 containing a marked stockout is excluded because observed sales were censored
 by unavailable stock. If no uncensored target remains, training fails with an
 explicit input error. Unmarked stockouts cannot be inferred from zero sales.
@@ -949,7 +1015,7 @@ Selected public features are retained only when their model improves purged
 holdout weighted absolute percentage error over the private sales and
 inventory model; otherwise the plan uses private features alone. Saved plans
 from earlier browser model versions require retraining.
-The inventory CSV must cover at least 130 sales days per drug with a same-day
+The inventory CSV must cover at least 180 sales days per drug with a same-day
 or previous-day snapshot. A single latest snapshot is rejected. Each row needs
 a real date, and each drug's latest inventory date must equal its last sales date.
 If a selected public-signal window yields no eligible features, the dashboard

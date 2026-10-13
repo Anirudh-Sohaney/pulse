@@ -1,5 +1,7 @@
 """Source refreshes retain native periods and remain idempotent on replay."""
 
+import hashlib
+import json
 from datetime import datetime, timezone
 
 import pytest
@@ -92,7 +94,7 @@ def test_enforcement_publishes_complete_window_class_counts(store, monkeypatch):
     assert second["source_rows_written"] == 0
     assert second["signal_rows_written"] == 0
     with signal_store.connect() as db:
-        rows = db.execute("""SELECT d.entity_key, r.value, r.observation_date
+        rows = db.execute("""SELECT d.entity_key, d.cadence, r.value, r.observation_date
             FROM signal_records r JOIN signal_definitions d ON d.id=r.signal_uid
             WHERE r.source_kind=?""", (refresh_enforcement.SOURCE_NAME,)).fetchall()
     assert len(rows) == 5
@@ -103,3 +105,55 @@ def test_enforcement_publishes_complete_window_class_counts(store, monkeypatch):
         "openfda_enforcement_class:not_yet_classified": 0,
         "openfda_enforcement_class:total": 2}
     assert all(row["observation_date"] == "2026-09-30" for row in rows)
+    assert all(row["cadence"] == "rolling_30d" for row in rows)
+
+
+def test_enforcement_old_weekly_identity_migrates_to_rolling_window(store):
+    source = refresh_enforcement.SOURCE_NAME
+    period = "2026-09-30"
+    captured = "2026-10-10T15:00:00+00:00"
+    quality = "official_openfda_enforcement;source_last_updated=2026-09-30;not_active_recall_status"
+    with signal_store.connect() as db:
+        source_rows = [refresh_enforcement._raw_row({
+            "recall_number": f"D-{index}", "report_date": "20260930",
+            "classification": "Class I"}) for index in (1, 2)]
+        db.executemany("""INSERT INTO enforcement_snapshot_rows
+            (row_hash, recall_number, report_date, classification, payload_json)
+            VALUES (?, ?, ?, ?, ?)""", source_rows)
+        generation = db.execute("""INSERT INTO enforcement_snapshot_generations
+            (window_start, window_end, source_last_updated, retrieved_at, row_count)
+            VALUES ('2026-09-01', ?, ?, ?, 2)""",
+            (period, period, captured)).lastrowid
+        db.executemany("""INSERT INTO enforcement_snapshot_generation_rows
+            (generation_id, row_hash) VALUES (?, ?)""",
+            [(generation, row[0]) for row in source_rows])
+        old_uid = signal_store.ensure_source_definition(
+            db, signal_id=refresh_enforcement.SIGNAL_ID, cadence="weekly",
+            geography_level="national", geography_id="US",
+            entity_key="openfda_enforcement_class:total", unit="reports",
+            source_name="FDA drug enforcement reports: Total",
+            source_url=refresh_enforcement.SOURCE_URL)
+        old_hash = hashlib.sha256(json.dumps(
+            [source, old_uid, period, period, 2.0],
+            separators=(",", ":")).encode()).hexdigest()
+        db.execute("""INSERT INTO signal_records
+            (row_hash, signal_uid, signal_date, observation_date, value,
+             source_timestamp, ingested_at, data_quality, source_kind, source_url)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (old_hash, old_uid, "2026-10-10", period, 2.0, captured, captured,
+             quality, source, refresh_enforcement.SOURCE_URL))
+        db.execute("PRAGMA user_version=3")
+    signal_store.initialize()
+    signal_store.initialize()
+    with signal_store.connect() as db:
+        rows = db.execute("""SELECT d.id, d.cadence, r.observation_date, r.value,
+            r.source_timestamp FROM signal_records r JOIN signal_definitions d
+            ON d.id=r.signal_uid WHERE r.source_kind=?""", (source,)).fetchall()
+        assert len(rows) == 1
+        assert rows[0]["id"] != old_uid
+        assert rows[0]["cadence"] == "rolling_30d"
+        assert rows[0]["observation_date"] == period
+        assert rows[0]["source_timestamp"] == captured
+        assert rows[0]["value"] == 2.0
+        assert db.execute("SELECT COUNT(*) FROM signal_definitions WHERE id=?",
+                          (old_uid,)).fetchone()[0] == 0

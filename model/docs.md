@@ -1,22 +1,23 @@
-# Production Model Documentation
+# Model documentation index
 
-The `/model/` directory has been transitioned from a testing/experimental sandbox to a final production-ready state.
+The active local short-horizon research model is
+`arkansas_pharma_signal/synthetic_horizon_xgb.py`. Its command-line runner is
+`scripts/train_synthetic_horizon_xgb.py`; trained per-drug XGBoost boosters and
+the full score/feature manifest are under
+`trained/synthetic_horizon_xgb_v1/`. It evaluates next-1/7/14/30-day recorded
+units sold for 30 synthetic drug series, using five selected historical signal
+series per drug and comparing against matched sales-only models. See
+[`README.md`](README.md) and [`comparison.md`](comparison.md) for results and
+limitations.
 
-## Final Deliverable
-The primary entry point is `model/prod_pipeline.py`. 
-When executed, this script:
-1. Fetches real-world input data (via APIs and placeholders for News).
-2. Performs full-data model training (merging all historical training and testing splits into one final model).
-3. Produces a unified prediction dictionary containing:
-   - 20 base news sentiment signals (monthly)
-   - 18 Arkansas ATC therapeutic demand state signals (monthly)
-   - 1,368 CMS Part D drug demand state signals (annual)
-4. Outputs the results to `model/final_predictions.json`.
+The public website currently publishes selected annual Arkansas Medicare Part
+D claims-state projections through a separate baseline. Those are claims
+proxies, not daily pharmacy sales forecasts. The article-to-20-signal model
+remains an unvalidated shadow experiment, and its outputs are not proven
+inputs to a live drug forecast. `prod_pipeline.py` fails closed for forecast
+output when its required operational inputs cannot be verified.
 
-## Data Sources
-- **HHS Medicaid Provider Spending**: Monthly drug billing data.
-- **CMS Medicare Part D**: Annual prescribers summary.
-- **GDELT News Events**: Pre-processed monthly sentiment features.
-
-## Cleanup
-All outdated `evaluate_*.py` and `build_*.py` testing scripts have been removed to keep the codebase clean, simple, and strictly aligned with production delivery. The historical rigorous evaluation metadata remains located in `model/docs/`.
+Project targets, source availability, and past research are documented in
+[`docs/PROJECT_GOAL.md`](docs/PROJECT_GOAL.md),
+[`docs/TARGET_AVAILABILITY.md`](docs/TARGET_AVAILABILITY.md), and
+[`docs/REBUILD_PROGRESS.md`](docs/REBUILD_PROGRESS.md).

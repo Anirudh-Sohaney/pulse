@@ -1,5 +1,10 @@
 # Pulse — Demand and Replenishment Demo Specification
 
+> Historical research specification. The current local API serves 1,018
+> consistency-selected Arkansas Part D claims-state projections. The older
+> 1,312-series research catalog and its 20 intermediate news outputs are not
+> the live ranking inputs; see [README.md](README.md) for the current contract.
+
 ## Table of Contents
 
 1. [Project Overview](#project-overview)
@@ -24,12 +29,12 @@
 
 Build a reproducible scientific proof-of-concept for per-drug demand forecasting and replenishment planning. The current interface accepts account-scoped sales and inventory uploads; the repository's synthetic Arkansas clinic records can be used as sample inputs. It makes no claim about observed Arkansas pharmacy inventory.
 
-The platform trains one direct next-14-day XGBoost demand regressor per drug from prior daily sales, using the selected benchmark procedure in `../test/run_publishable_benchmark.py`. Its 14-day prediction is allocated across individual days using recent day-of-week sales and combined with the uploaded on-hand inventory. It presents estimated demand and minimum-buy quantities at 1, 7, and 14 days, stockout timing, and a 14-day target-stock recommendation. The shorter-horizon allocations are not separately validated forecast models.
+The browser planner trains separate direct next-1-, 7-, 14-, and 30-day XGBoost regressors per drug from prior daily sales, using the short-horizon research structure in `../model/arkansas_pharma_signal/synthetic_horizon_xgb.py`. Each horizon compares a five-signal candidate with sales-only on a purged chronological holdout. The direct totals are made nondecreasing for planning, then allocated within each interval to estimate stockout timing and 1-, 7-, and 14-day minimum-buy quantities. The 30-day total is informational; it is not a 30-day purchase instruction. The synthetic benchmark does not validate accuracy on a user's pharmacy.
 
 ### Current demonstration contract
 
-- **Sales history:** a user-uploaded CSV with at least 130 consecutive daily rows per drug. The 32,880-row, 30-product synthetic dataset from 2023-01-01 through 2025-12-31 is an optional demo input; its limitations are documented in `../data/synthetic_pharmacy_data/synthetic_guide.md`.
-- **News and public-signal context:** the frozen long-format catalog has 1,312 dated candidate series. For each drug, the model selects up to five by training-period absolute correlation with its direct 14-day target, then uses their 1-, 7-, and 14-day lags. The catalog is context and provenance, not 1,312 local demand measurements.
+- **Sales history:** a user-uploaded CSV with at least 180 consecutive daily rows per drug. The 32,880-row, 30-product synthetic dataset from 2023-01-01 through 2025-12-31 is an optional demo input; its limitations are documented in `../data/synthetic_pharmacy_data/synthetic_guide.md`.
+- **News and public-signal context:** the frozen long-format catalog has 1,312 dated candidate series. For each drug and horizon, the model selects five distinct series by training-period absolute correlation, then uses their 1-, 7-, and 14-day lags. Only source rows with usable historical timestamps enter the private model; unvalidated article shadow estimates are excluded. The catalog is context and provenance, not 1,312 local demand measurements.
 - **Inventory:** the latest uploaded on-hand and on-order quantities for each drug. Lead time, safety stock, reorder point, and target stock use a transparent demonstration policy.
 - **Planning policy:** lead time is a seven-day demonstration assumption. The 14-day target is trailing mean demand plus normal-demand safety stock. Recommendations are demonstration outputs, not procurement instructions.
 - **Access:** each account can upload, retrain, and inspect only its own saved records and model.

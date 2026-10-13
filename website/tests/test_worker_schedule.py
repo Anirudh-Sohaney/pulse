@@ -75,7 +75,9 @@ def test_catch_up_retries_missing_news_source_after_fallback(tmp_path, monkeypat
     assert len(due_before) == len(worker.REFRESH_TASKS) - 3
 
     due_after = {task.__name__ for task in worker.due_tasks(utc(2, 17))}
-    assert len(due_after) == len(worker.REFRESH_TASKS)
+    assert "refresh_daily_signal_demand_outlook" not in due_after
+    assert "refresh_bls" not in due_after
+    assert len(due_after) == len(worker.REFRESH_TASKS) - 1
 
     with signal_store.connect() as db:
         for source in ("bls_public_api_v1", "openfda_shortages", "gdelt_recent_news"):
@@ -109,8 +111,8 @@ def test_catch_up_retries_missing_news_source_after_fallback(tmp_path, monkeypat
     assert "refresh_fda_drugs_news" not in due_after_cooldown
     assert "refresh_fda_medwatch_news" in due_after_cooldown
     assert "refresh_bls" not in due_after_cooldown
-    due_next_day = {task.__name__ for task in worker.due_tasks(utc(3, 16))}
-    assert "refresh_bls" in due_next_day
+    due_after_bls_interval = {task.__name__ for task in worker.due_tasks(utc(10, 16))}
+    assert "refresh_bls" in due_after_bls_interval
 
 
 def test_baseline_reruns_when_cms_source_succeeds_after_it(tmp_path, monkeypatch):
@@ -118,7 +120,7 @@ def test_baseline_reruns_when_cms_source_succeeds_after_it(tmp_path, monkeypatch
     signal_store.initialize()
     with signal_store.connect() as db:
         for source, day, hour in (
-            ("cms_partd_two_year_persistence_v2", 2, 16),
+            ("cms_partd_two_year_tiered_v4", 2, 16),
             ("cms_partd_catalog_source", 2, 17),
         ):
             db.execute("""INSERT INTO refresh_runs
@@ -132,7 +134,7 @@ def test_baseline_reruns_when_cms_source_succeeds_after_it(tmp_path, monkeypatch
     with signal_store.connect() as db:
         db.execute("""INSERT INTO refresh_runs
             (source_name, started_at, finished_at, status)
-            VALUES ('cms_partd_two_year_persistence_v2', ?, ?, 'success')""",
+            VALUES ('cms_partd_two_year_tiered_v4', ?, ?, 'success')""",
             (utc(2, 18).isoformat(), utc(2, 18, 5).isoformat()))
     due = {task.__name__ for task in worker.due_tasks(utc(2, 19))}
     assert "refresh_demand_baseline" not in due

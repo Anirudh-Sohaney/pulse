@@ -6,6 +6,7 @@ import json
 import hashlib
 import math
 import sqlite3
+from calendar import monthrange
 from collections import Counter
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -20,6 +21,9 @@ from scripts.import_signal_catalog import DEFAULT_HISTORY, DEFAULT_HISTORY_SHA25
 UNKNOWN_SOURCE_TIME_KINDS = {"historical_catalog", "historical_news_bridge"}
 WEEKLY_SOURCE_KINDS = {"delphi_fluview_ilinet_v5", "cdc_nndss_weekly_v1",
                        "cdc_wval_reporting_site_mean_v1"}
+MONTHLY_SOURCE_KINDS = {"bls_public_api_v1", "bls_public_api_v1_derived_v2",
+                        "medicaid_state_performance_api"}
+ANNUAL_SOURCE_KINDS = {"cms_geographic_variation_api"}
 LIVE_OBSERVATION_KINDS = WEEKLY_SOURCE_KINDS | {
     "bls_public_api_v1", "bls_public_api_v1_derived_v2",
     "medicaid_state_performance_api", "cms_geographic_variation_api",
@@ -81,6 +85,7 @@ def audit(path: Path | None = None, *, expected_definitions: int = SEED_DEFINITI
         if db.execute("PRAGMA foreign_key_check").fetchone() is not None:
             problems.append("SQLite foreign key check failed")
         definition_rows = list(db.execute("SELECT * FROM signal_definitions"))
+        definition_by_id = {row["id"]: row for row in definition_rows}
         definitions = len(definition_rows)
         if definitions < expected_definitions:
             problems.append(
@@ -104,6 +109,9 @@ def audit(path: Path | None = None, *, expected_definitions: int = SEED_DEFINITI
             source_counts[row["source_kind"]] += 1
             if row["source_kind"] == "combined_demand_signals":
                 problems.append(f"{row['row_hash']}: unsupported combined-model output remains")
+            if (row["source_kind"] == "openfda_drug_enforcement"
+                    and definition_by_id[row["signal_uid"]]["cadence"] != "rolling_30d"):
+                problems.append(f"{row['row_hash']}: FDA 30-day window has incorrect cadence")
             for column in ("signal_date", "observation_date"):
                 if not _date(row[column]):
                     problems.append(f"{row['row_hash']}: invalid {column}")
@@ -128,6 +136,12 @@ def audit(path: Path | None = None, *, expected_definitions: int = SEED_DEFINITI
                     problems.append(f"{row['row_hash']}: future live observation period")
                 if row["source_kind"] in WEEKLY_SOURCE_KINDS and observed.weekday() != 5:
                     problems.append(f"{row['row_hash']}: weekly source period is not Saturday")
+                if (row["source_kind"] in MONTHLY_SOURCE_KINDS and
+                        observed.day != monthrange(observed.year, observed.month)[1]):
+                    problems.append(f"{row['row_hash']}: monthly source period is not month end")
+                if (row["source_kind"] in ANNUAL_SOURCE_KINDS and
+                        (observed.month, observed.day) != (12, 31)):
+                    problems.append(f"{row['row_hash']}: annual source period is not year end")
                 if (row["source_kind"] == "cdc_wval_reporting_site_mean_v1"
                         and (not row["data_quality"] or
                              "contributing_site_rows=" not in row["data_quality"])):

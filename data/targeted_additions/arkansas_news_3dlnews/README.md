@@ -10,14 +10,27 @@
 ## Retrieval
 - Retrieved at (UTC): **2026-08-12**
 - Downloader: `scripts/download_3dlnews_ar.py` (curl, 4-way parallel, retries to `raw/`).
-- All 10 yearly files downloaded successfully into `raw/`.
+- The local checkout initially contained Git LFS pointer stubs. On 2026-10-11,
+  all 10 archives were fetched directly from the documented Globus host and
+  verified against the manifest's byte and row counts and the existing LFS
+  SHA-256 object IDs. The downloader now detects pointer stubs, downloads to a
+  temporary file, and validates the gzip archive before replacing them.
 
 ## Files
 - `raw/preprocessed_newspaper_articles_AR_{year}.jsonl.gz` — source JSONL (gzipped), one JSON object per line.
 - `data/arkansas_3dlnews_targeted_article_metadata.csv.gz` — **1,246 metadata rows** (articles with ≥1 keyword hit **and** a title).
 - `data/arkansas_3dlnews_monthly_keyword_counts.csv.gz` — **507 group×month buckets** (article counts by keyword group and publication year-month).
 
-**Article full text is NOT stored** — only metadata plus a keyword-hit summary. Raw files in `raw/` retain full text if downstream need re-scoring.
+The raw JSONL archives contain title text for 11,566 records and a `content`
+field for 8,035 records. The normalized metadata export intentionally omits
+article bodies and retains only titles plus keyword-hit summaries. Raw text is
+kept locally for research extraction; check publisher terms before
+redistributing it.
+
+The 13,689 raw records include 6,647 valid publication dates. All 60 months
+from 2018-01 through 2022-12 have dated title or content text, with 39–145
+records per month (median 81). The archive is therefore useful for historical
+monthly experiments, though it does not cover the full 2018–2026 target table.
 
 ## Normalisation (`scripts/build_targeted_metadata.py`)
 - Parses JSONL safely (per-line `json.loads`, tolerant of bad lines/encodings).

@@ -104,10 +104,27 @@ def refresh_news_model() -> dict:
         output = predict(text, model)
         if set(output) != set(expected_ids) or len(output) != 20:
             raise ValueError("20-signal inference returned an incomplete output set")
+        # The ten-month text fit is kept in shadow. Even there, reject a
+        # prediction outside the 97-month archived support for its own ID.
+        # This is a consistency bound, not evidence that the value is true.
+        with connect() as db:
+            support = {row["signal_id"]: row for row in db.execute("""
+                SELECT d.signal_id, COUNT(DISTINCT r.observation_date) AS periods,
+                       MIN(r.value) AS minimum, MAX(r.value) AS maximum
+                FROM signal_records r JOIN signal_definitions d ON d.id=r.signal_uid
+                WHERE d.signal_origin='model_news_output'
+                  AND r.source_kind IN ('historical_catalog', 'historical_news_bridge')
+                GROUP BY d.signal_id""")}
+        if set(support) != set(expected_ids) or any(
+                support[name]["periods"] != 97
+                or not support[name]["minimum"] <= value <= support[name]["maximum"]
+                for name, value in output.items()):
+            raise ValueError("20-signal shadow estimate exceeds its archived support")
         finished = datetime.now(timezone.utc)
         finished_text = finished.isoformat()
         source_names = sorted({row["source"] for row, _ in unique_articles})
         quality = ("model_estimate;shadow_only;not_observed;not_validated_for_publication;"
+                   "historical_support_97_months_checked;alias_pairs_checked;"
                    f"input_summary_text;estimate_kind={estimate_kind};"
                    f"article_count={len(unique_articles)};"
                    f"sources={','.join(source_names)};month={month_start[:7]}")

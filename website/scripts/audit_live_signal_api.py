@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+from calendar import monthrange
 from datetime import date, datetime, timezone
 from urllib.request import Request, urlopen
 
@@ -20,6 +21,9 @@ UNSUPPORTED_KINDS = {SHADOW_KIND, "combined_demand_signals",
                      "historical_catalog", "historical_news_bridge"}
 WEEKLY_KINDS = {"delphi_fluview_ilinet_v5", "cdc_nndss_weekly_v1",
                 "cdc_wval_reporting_site_mean_v1"}
+MONTHLY_KINDS = {"bls_public_api_v1", "bls_public_api_v1_derived_v2",
+                 "medicaid_state_performance_api"}
+ANNUAL_KINDS = {"cms_geographic_variation_api"}
 SOURCE_KINDS = WEEKLY_KINDS | {"bls_public_api_v1", "bls_public_api_v1_derived_v2",
                                "medicaid_state_performance_api",
                                "cms_geographic_variation_api", "openfda_drug_enforcement"}
@@ -87,6 +91,15 @@ def audit(base_url: str, *, require_source_refresh: bool = False,
                     raise AssertionError(f"Invalid source availability time: {row['id']}")
                 if row["source_kind"] in WEEKLY_KINDS and observed.weekday() != 5:
                     raise AssertionError(f"Weekly period is not Saturday: {row['id']}")
+                if (row["source_kind"] in MONTHLY_KINDS and
+                        observed.day != monthrange(observed.year, observed.month)[1]):
+                    raise AssertionError(f"Monthly period is not month end: {row['id']}")
+                if (row["source_kind"] in ANNUAL_KINDS and
+                        (observed.month, observed.day) != (12, 31)):
+                    raise AssertionError(f"Annual period is not year end: {row['id']}")
+                if (row["source_kind"] == "openfda_drug_enforcement" and
+                        by_id[row["id"]]["cadence"] != "rolling_30d"):
+                    raise AssertionError(f"FDA report window has wrong cadence: {row['id']}")
             usable[row["id"]] = row
         for row in answer["latest_recorded_values"]:
             latest_recorded[row["id"]] = row
@@ -99,8 +112,7 @@ def audit(base_url: str, *, require_source_refresh: bool = False,
                     if by_id[uid]["signal_origin"] == "model_news_output"]
     atc_missing = [by_id[uid] for uid in missing
                    if by_id[uid]["signal_id"].startswith("arkansas_atc_demand_state::")]
-    if (len(news_missing) != 20 or len(atc_missing) != 18
-            or len(missing & seed_ids) != 38):
+    if len(news_missing) != 20 or len(atc_missing) != 18:
         raise AssertionError("The unvalidated seed-output boundary changed")
     if any(latest_recorded[row["id"]]["source_kind"] != SHADOW_KIND
            for row in news_missing):
@@ -108,11 +120,16 @@ def audit(base_url: str, *, require_source_refresh: bool = False,
 
     freshness = request("/api/v1/signals/freshness")
     coverage = request("/api/v1/signals/coverage/summary")
+    selected_seed = {uid for uid in seed_ids if uid in usable
+                     and usable[uid]["source_kind"] == "cms_partd_two_year_tiered_v4"}
+    expected_coverage = len(selected_seed) + 20
     if (freshness["definitions"] != len(catalog)
             or freshness["news_model"]["publishable"] is not False
-            or coverage["seeded_id_count"] != SEED_COUNT
+            or coverage["seeded_id_count"] != expected_coverage
+            or coverage["seeded_ids_with_usable_latest_value"] != len(selected_seed)
+            or coverage["missing_by_reason"] != {"unvalidated_article_text_shadow": 20}
             or coverage["seeded_ids_with_usable_latest_value"] +
-               coverage["seeded_ids_without_usable_latest_value"] != SEED_COUNT):
+               coverage["seeded_ids_without_usable_latest_value"] != expected_coverage):
         raise AssertionError("Freshness or seed coverage disagrees with latest values")
     live_kinds = {row["source_kind"] for row in usable.values()}
     if require_source_refresh and not (WEEKLY_KINDS | {
@@ -122,7 +139,7 @@ def audit(base_url: str, *, require_source_refresh: bool = False,
         raise AssertionError("A required public source has no usable latest values")
 
     history_checked = []
-    for kind in sorted(live_kinds & (SOURCE_KINDS | {"cms_partd_two_year_persistence_v2"})):
+    for kind in sorted(live_kinds & (SOURCE_KINDS | {"cms_partd_two_year_tiered_v4"})):
         sample = next(row for row in usable.values() if row["source_kind"] == kind)
         history = request("/api/v1/signals/history", {
             "ids": [sample["id"]], "date": sample["observation_date"]})
@@ -138,15 +155,20 @@ def audit(base_url: str, *, require_source_refresh: bool = False,
         ranked_rows.extend(request(
             f"/api/v1/signals/demand/drugs?limit=250&offset={offset}")["drugs"])
     if require_drug_baseline:
-        if (ranking.get("method") != "cms_partd_two_year_persistence_v2"
+        if (ranking.get("method") != "cms_partd_two_year_tiered_v4"
                 or not ranked_rows or len(ranked_rows) != ranking["filtered_total"]):
             raise AssertionError("Evaluated drug ranking is unavailable or incomplete")
         source_year = int(ranking["source_year"])
         target_year = int(ranking["target_year"])
         if target_year != source_year + 2:
             raise AssertionError("Drug ranking source and target years disagree")
+        tiers = ranking.get("evaluation", {}).get("selection_tiers") or {}
+        if (set(tiers) != {"high_history", "stable_far_from_cutoff"}
+                or sum(tiers.values()) != len(ranked_rows)):
+            raise AssertionError("Drug ranking evidence tiers are incomplete")
         for row in ranked_rows:
             if (row["id"] not in usable
+                    or row["selection_tier"] not in tiers
                     or row["observation_date"] != f"{source_year}-12-31"
                     or row["forecast_horizon"] != str(target_year)
                     or not 0 <= row["demand_state"] <= 4

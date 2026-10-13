@@ -48,8 +48,18 @@ def create_app() -> FastAPI:
     @app.middleware("http")
     async def limit_public_signals(request: Request, call_next):
         if request.url.path.startswith("/api/v1/signals/") and request.method != "OPTIONS":
+            api_key = request.headers.get("X-API-Key", "").strip()
+            client_id = auth._client_ip(request)
+            if api_key:
+                key_status, key_id = auth.consume_api_key(api_key)
+                if key_status == "invalid":
+                    return JSONResponse({"detail": "Invalid or expired API key"}, status_code=401)
+                if key_status == "limited":
+                    return JSONResponse({"detail": "API key daily request limit reached"},
+                                        status_code=429, headers={"Retry-After": "86400"})
+                client_id = f"api-key:{key_id}"
             retry_after = public_limiter.reserve(
-                auth._client_ip(request), request_cost(request.url.path))
+                client_id, request_cost(request.url.path))
             if retry_after:
                 return JSONResponse({"detail": "Public API request limit reached"},
                                     status_code=429, headers={"Retry-After": str(retry_after)})

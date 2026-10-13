@@ -8,6 +8,7 @@ import ipaddress
 import os
 import secrets
 import socket
+import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
@@ -30,7 +31,8 @@ PASSWORD_HASHER = PasswordHasher(time_cost=2, memory_cost=19 * 1024,
                                  parallelism=1, hash_len=32, salt_len=16,
                                  type=Type.ID)
 DUMMY_PASSWORD_HASH = PASSWORD_HASHER.hash(secrets.token_urlsafe(32))
-AUTH_SCHEMA_VERSION = 1
+AUTH_SCHEMA_VERSION = 2
+API_KEY_DAILY_LIMIT = 10_000
 
 
 def _database() -> Path:
@@ -102,6 +104,14 @@ def _migrate_database(path: Path) -> None:
                 (jti_hash TEXT PRIMARY KEY, username TEXT NOT NULL, expires_at TEXT NOT NULL,
                  created_at TEXT NOT NULL, FOREIGN KEY(username) REFERENCES accounts(username))""")
             connection.execute("CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(username, expires_at)")
+            connection.execute("""CREATE TABLE IF NOT EXISTS api_keys (
+                key_id TEXT PRIMARY KEY, username TEXT NOT NULL, name TEXT NOT NULL,
+                key_hash TEXT NOT NULL UNIQUE, key_prefix TEXT NOT NULL,
+                created_at TEXT NOT NULL, expires_at TEXT NOT NULL,
+                revoked_at TEXT, last_used_at TEXT, usage_day TEXT,
+                daily_requests INTEGER NOT NULL DEFAULT 0,
+                FOREIGN KEY(username) REFERENCES accounts(username))""")
+            connection.execute("CREATE INDEX IF NOT EXISTS idx_api_keys_user ON api_keys(username, created_at)")
             connection.execute(f"PRAGMA user_version={AUTH_SCHEMA_VERSION}")
             connection.commit()
         finally:
@@ -258,6 +268,81 @@ class Token(BaseModel):
     token_type: str
 
 
+class ApiKeyRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    expires_in_days: int = Field(default=90, ge=1, le=365)
+
+
+def create_api_key(username: str, request: ApiKeyRequest) -> dict:
+    """Create a one-time-readable, signals:read API key for an account."""
+    name = request.name.strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="Key name cannot be blank")
+    now = datetime.now(timezone.utc)
+    created_at = now.isoformat()
+    expires_at = (now + timedelta(days=request.expires_in_days)).isoformat()
+    raw_key = "pulse_live_" + secrets.token_urlsafe(32)
+    key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
+    key_id = uuid.uuid4().hex
+    with _connect() as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        active_count = connection.execute("""SELECT COUNT(*) FROM api_keys
+            WHERE username=? AND revoked_at IS NULL AND expires_at>?""",
+            (username, created_at)).fetchone()[0]
+        if active_count >= 10:
+            raise HTTPException(status_code=409, detail="Revoke an existing key before creating another")
+        connection.execute("""INSERT INTO api_keys
+            (key_id, username, name, key_hash, key_prefix, created_at, expires_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (key_id, username, name, key_hash, raw_key[:20], created_at, expires_at))
+    return {"id": key_id, "name": name, "key": raw_key,
+            "key_prefix": raw_key[:20], "scope": "signals:read",
+            "created_at": created_at, "expires_at": expires_at,
+            "daily_request_limit": API_KEY_DAILY_LIMIT,
+            "warning": "Copy this key now. It cannot be shown again."}
+
+
+def list_api_keys(username: str) -> list[dict]:
+    now = datetime.now(timezone.utc).isoformat()
+    with _connect() as connection:
+        rows = connection.execute("""SELECT key_id, name, key_prefix, created_at,
+            expires_at, revoked_at, last_used_at, usage_day, daily_requests
+            FROM api_keys WHERE username=? ORDER BY created_at DESC""",
+            (username,)).fetchall()
+    return [{"id": row["key_id"], "name": row["name"],
+             "key_prefix": row["key_prefix"], "scope": "signals:read",
+             "created_at": row["created_at"], "expires_at": row["expires_at"],
+             "revoked_at": row["revoked_at"], "last_used_at": row["last_used_at"],
+             "requests_today": row["daily_requests"] if row["usage_day"] == now[:10] else 0,
+             "status": ("revoked" if row["revoked_at"] else
+                        "expired" if row["expires_at"] <= now else "active")}
+            for row in rows]
+
+
+def consume_api_key(raw_key: str) -> tuple[str, str]:
+    """Validate and charge one signals:read request; return status and key ID."""
+    if not raw_key.startswith("pulse_live_") or len(raw_key) > 128:
+        return "invalid", ""
+    now = datetime.now(timezone.utc)
+    now_text = now.isoformat()
+    day = now.date().isoformat()
+    digest = hashlib.sha256(raw_key.encode()).hexdigest()
+    with _connect() as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        row = connection.execute("""SELECT key_id, revoked_at, expires_at,
+            usage_day, daily_requests FROM api_keys WHERE key_hash=?""",
+            (digest,)).fetchone()
+        if row is None or row["revoked_at"] is not None or row["expires_at"] <= now_text:
+            return "invalid", ""
+        used = row["daily_requests"] if row["usage_day"] == day else 0
+        if used >= API_KEY_DAILY_LIMIT:
+            return "limited", row["key_id"]
+        connection.execute("""UPDATE api_keys SET last_used_at=?, usage_day=?,
+            daily_requests=? WHERE key_id=?""",
+            (now_text, day, used + 1, row["key_id"]))
+    return "valid", row["key_id"]
+
+
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
     payload = data.copy()
     payload["exp"] = datetime.now(timezone.utc) + (expires_delta or timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES))
@@ -382,3 +467,28 @@ def logout_all(response: Response, current_user: User = Depends(get_current_user
 @router.get("/me", response_model=User)
 def read_users_me(current_user: User = Depends(get_current_user)):
     return current_user
+
+
+@router.post("/api-keys", status_code=201)
+def issue_api_key(request: ApiKeyRequest,
+                  current_user: User = Depends(get_current_user)):
+    return create_api_key(current_user.username, request)
+
+
+@router.get("/api-keys")
+def read_api_keys(current_user: User = Depends(get_current_user)):
+    return {"keys": list_api_keys(current_user.username),
+            "daily_request_limit": API_KEY_DAILY_LIMIT}
+
+
+@router.delete("/api-keys/{key_id}")
+def revoke_api_key(key_id: str,
+                   current_user: User = Depends(get_current_user)):
+    with _connect() as connection:
+        changed = connection.execute("""UPDATE api_keys SET revoked_at=?
+            WHERE key_id=? AND username=? AND revoked_at IS NULL""",
+            (datetime.now(timezone.utc).isoformat(), key_id,
+             current_user.username)).rowcount
+    if not changed:
+        raise HTTPException(status_code=404, detail="API key not found")
+    return {"id": key_id, "revoked": True}

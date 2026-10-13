@@ -2,8 +2,8 @@ import { apiFetch, ApiError } from './api'
 import { savePrivatePlan, unlockPrivateStore, lockPrivateStore } from './privateStore'
 
 export type BrowserPlan = {
-  items: Array<{ drug_name: string; on_hand_units: number; on_order_units?: number; expected_arrival_date?: string | null; incoming_eta_overdue?: boolean; incoming_counted_by_day_14?: boolean; as_of_date?: string; forecast_1d_units: number; forecast_7d_units: number; forecast_14d_units: number; days_until_stockout: number | null; minimum_buy_1d_units: number; minimum_buy_7d_units: number; minimum_buy_14d_units: number; recommended_order_units: number; inventory_status: string }>
-  per_drug: Array<{ drug_name: string; wape: number; signals_used: string[] }>
+  items: Array<{ drug_name: string; on_hand_units: number; on_order_units?: number; expected_arrival_date?: string | null; incoming_eta_overdue?: boolean; incoming_counted_by_day_14?: boolean; as_of_date?: string; forecast_1d_units: number; forecast_7d_units: number; forecast_14d_units: number; forecast_30d_units: number; days_until_stockout: number | null; minimum_buy_1d_units: number; minimum_buy_7d_units: number; minimum_buy_14d_units: number; recommended_order_units: number; inventory_status: string }>
+  per_drug: Array<{ drug_name: string; wape: number; signals_used: string[]; by_horizon: Record<string, { wape: number; private_only_wape: number; signals_used: string[] }> }>
   history_start: string
   history_end: string
   signal_years: number
@@ -171,19 +171,21 @@ export async function trainInBrowser(sales: File, inventory: File, signalYears: 
           if (signalYears > 0) {
             onProgress('Downloading public signal history')
             const catalogSignals = await loadSignalCatalog(assertWorkspace)
-            // The trainer discards records outside this observation window and
-            // model outputs that have no validated live publication path.
+            // Allow current generated signal estimates as well as observed
+            // features. The trainer uses each only from its source timestamp.
             const ids: string[] = catalogSignals
               .filter((row: CatalogSignal) =>
                 row.latest_observation_date !== null &&
                 row.latest_observation_date >= message.window.start_date &&
-                row.signal_origin !== 'model_news_output' &&
                 !row.signal_id.startsWith('arkansas_atc_demand_state::'))
               .map((row: CatalogSignal) => row.id)
+            const historyEnd = new Date(`${message.window.end_date}T00:00:00Z`)
+            historyEnd.setUTCDate(historyEnd.getUTCDate() + 45)
+            const signalHistoryEnd = historyEnd.toISOString().slice(0, 10)
             for (let index = 0; index < ids.length; index += 100) {
               assertWorkspace()
               const rows = await loadSignalHistory(ids.slice(index, index + 100),
-                message.window.start_date, message.window.end_date, assertWorkspace)
+                message.window.start_date, signalHistoryEnd, assertWorkspace)
               signalRows = signalRows.concat(rows)
               onProgress(`Loaded ${Math.min(index + 100, ids.length)} of ${ids.length} signal identities`)
             }

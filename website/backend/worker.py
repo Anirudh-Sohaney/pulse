@@ -40,6 +40,7 @@ logger = logging.getLogger(__name__)
 SCHEDULE_HOUR_UTC = 16
 RETRY_POLL_SECONDS = 15 * 60
 RETRY_DELAY = timedelta(hours=6)
+BLS_REFRESH_INTERVAL = timedelta(days=7)
 TRANSIENT_DNS_RETRY_DELAY = timedelta(minutes=30)
 GDELT_RATE_LIMIT_RETRY_DELAY = timedelta(hours=24)
 NEWS_MODEL_RETRY_DELAY = timedelta(hours=24)
@@ -68,7 +69,7 @@ REFRESH_TASKS: tuple[tuple[Callable[[], dict], tuple[str, ...]], ...] = (
     (refresh_sdud, ("medicaid_sdud_arkansas",)),
     (refresh_cms_partd_source, ("cms_partd_catalog_source",)),
     (refresh_hhs_ndc_release, ("hhs_ndc_release_catalog",)),
-    (refresh_demand_baseline, ("cms_partd_two_year_persistence_v2",)),
+    (refresh_demand_baseline, ("cms_partd_two_year_tiered_v4",)),
 )
 
 
@@ -156,15 +157,22 @@ def due_tasks(now: datetime | None = None) -> list[Callable[[], dict]]:
                               and (name not in latest_success_at
                                    or failed_at[name][0] > latest_success_at[name])),
                              key=lambda item: item[0], default=None)
+        if refresh is refresh_bls:
+            # BLS is a monthly, optional context source with a strict
+            # unauthenticated request quota. Space both successful refreshes
+            # and retries so manual runs or one quota response cannot cause
+            # daily polling or affect other signal families.
+            last_bls_event = latest_success_at.get(names[0], datetime.min.replace(
+                tzinfo=timezone.utc))
+            if latest_failure is not None and latest_failure[0] > last_bls_event:
+                last_bls_event = latest_failure[0]
+            if current - last_bls_event < BLS_REFRESH_INTERVAL:
+                continue
         if (all_sources_succeeded and latest_failure is None
                 and not news_evidence_changed and not source_newer_than_baseline):
             continue
         if latest_failure is not None:
             failed_time, failure_message = latest_failure
-            # An unregistered BLS v1 caller has a limited daily request budget.
-            # A partial refresh may have consumed it, so retry on the next schedule.
-            if refresh is refresh_bls and failed_time.date() >= current.date():
-                continue
             minimum_retry_delay = RETRY_DELAY
             if TRANSIENT_DNS_PATTERN.search(failure_message):
                 minimum_retry_delay = TRANSIENT_DNS_RETRY_DELAY

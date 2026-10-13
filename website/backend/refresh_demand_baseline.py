@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -18,9 +19,12 @@ from .refresh_cms_partd_source import source_snapshot
 from .signal_store import connect, initialize, signal_uid
 
 
-SOURCE_KIND = "cms_partd_two_year_persistence_v2"
+SOURCE_KIND = "cms_partd_two_year_tiered_v4"
 MIN_FOLDS = 4
 MIN_BALANCED_ACCURACY = 0.75
+MIN_SELECTED_HOLDOUT_BALANCED_ACCURACY = 0.85
+MIN_CUTOFF_LOG_DISTANCE = 0.25
+MAX_PUBLIC_DRUG_OUTPUTS = 1200
 CMS_SIGNAL_SOURCE_NAME = "PULSE production CMS Part D demand output"
 CMS_SIGNAL_SOURCE_URL = (
     "https://data.cms.gov/provider-summary-by-type-of-service/"
@@ -104,6 +108,97 @@ def evaluate(frame: pd.DataFrame) -> dict:
             "folds": folds}
 
 
+def _selection_tier(claims: float, thresholds: list[float] | np.ndarray,
+                    prior_claims: float | None, historical_matches: list[bool],
+                    required_matches: int) -> str | None:
+    if len(historical_matches) == required_matches and all(historical_matches):
+        return "high_history"
+    if prior_claims is None:
+        return None
+    state = int(np.digitize(claims, thresholds))
+    if state != int(np.digitize(prior_claims, thresholds)):
+        return None
+    distance = min(abs(math.log1p(claims) - math.log1p(boundary))
+                   for boundary in thresholds)
+    return "stable_far_from_cutoff" if distance >= MIN_CUTOFF_LOG_DISTANCE else None
+
+
+def _selected_fold(frame: pd.DataFrame, pairs: pd.DataFrame,
+                   selected_fold: dict, prior_folds: list[dict]) -> dict:
+    year = selected_fold["feature_year"]
+    thresholds = selected_fold["thresholds"]
+    prior_claims = frame.loc[frame["year"] == year - 1].set_index("drug_key")["demand_claims"]
+    prior_results: dict[str, list[bool]] = {}
+    for fold in prior_folds:
+        for row in pairs[pairs["year"] == fold["feature_year"]].itertuples():
+            prior_results.setdefault(row.drug_key, []).append(
+                int(np.digitize(row.target_claims, fold["thresholds"])) ==
+                int(np.digitize(row.current_claims, fold["thresholds"])))
+    rows = []
+    for row in pairs[pairs["year"] == year].itertuples():
+        tier = _selection_tier(
+            row.current_claims, thresholds,
+            float(prior_claims[row.drug_key]) if row.drug_key in prior_claims else None,
+            prior_results.get(row.drug_key, []), len(prior_folds))
+        if tier:
+            rows.append((tier, int(np.digitize(row.target_claims, thresholds)),
+                         int(np.digitize(row.current_claims, thresholds))))
+    if not rows:
+        raise ValueError(f"No selected drugs in chronological fold {year}")
+    actual = np.array([row[1] for row in rows])
+    predicted = np.array([row[2] for row in rows])
+    if set(actual.tolist()) != set(range(5)):
+        raise ValueError(f"Selected fold {year} lacks a demand category")
+    return {"feature_year": year, "rows": len(rows),
+            "accuracy": float(np.mean(actual == predicted)),
+            "balanced_accuracy": float(np.mean([
+                np.mean(predicted[actual == state] == state) for state in range(5)])),
+            "tiers": {tier: {"rows": sum(item[0] == tier for item in rows),
+                             "accuracy": float(np.mean([
+                                 item[1] == item[2] for item in rows if item[0] == tier]))}
+                      for tier in ("high_history", "stable_far_from_cutoff")}}
+
+
+def consistent_drugs(frame: pd.DataFrame, metrics: dict,
+                     publication_thresholds: np.ndarray) -> tuple[dict[str, str], dict]:
+    """Publish strong history or stable claims far from a state boundary."""
+    folds = metrics["folds"]
+    if len(folds) != 4:
+        raise ValueError("Drug consistency selection requires four chronological folds")
+    pairs = paired_years(frame)
+    validation = _selected_fold(frame, pairs, folds[2], folds[:2])
+    holdout = _selected_fold(frame, pairs, folds[3], folds[:3])
+    if holdout["balanced_accuracy"] < MIN_SELECTED_HOLDOUT_BALANCED_ACCURACY:
+        raise ValueError("Selected drugs failed the later chronological fold")
+    history: dict[str, list[bool]] = {}
+    for fold in folds[:3]:
+        for row in pairs[pairs["year"] == fold["feature_year"]].itertuples():
+            history.setdefault(row.drug_key, []).append(
+                int(np.digitize(row.target_claims, fold["thresholds"])) ==
+                int(np.digitize(row.current_claims, fold["thresholds"])))
+    source_year = int(frame["year"].max())
+    prior_claims = frame.loc[frame["year"] == source_year - 1].set_index("drug_key")["demand_claims"]
+    selected: dict[str, str] = {}
+    for row in frame[frame["year"] == source_year].itertuples():
+        tier = _selection_tier(
+            row.demand_claims, publication_thresholds,
+            float(prior_claims[row.drug_key]) if row.drug_key in prior_claims else None,
+            history.get(row.drug_key, []), 3)
+        if tier:
+            selected[row.drug_key] = tier
+    if not selected or len(selected) > MAX_PUBLIC_DRUG_OUTPUTS:
+        raise ValueError("Tiered selection produced no drugs or exceeded the public output cap")
+    return selected, {"selection_feature_years": [fold["feature_year"] for fold in folds[:3]],
+                      "cutoff_log_distance": MIN_CUTOFF_LOG_DISTANCE,
+                      "selected_drugs": len(selected),
+                      "selection_tiers": {tier: sum(value == tier for value in selected.values())
+                                          for tier in ("high_history", "stable_far_from_cutoff")},
+                      "validation": validation, "holdout": holdout,
+                      "holdout_accuracy": holdout["accuracy"],
+                      "holdout_balanced_accuracy": holdout["balanced_accuracy"],
+                      "holdout_rows": holdout["rows"]}
+
+
 def ensure_drug_signal_definitions(db, drug_keys: list[str]) -> int:
     """Give each evaluated drug output a stable catalog ID before recording it."""
     definitions = []
@@ -147,11 +242,15 @@ def refresh_demand_baseline() -> dict:
         metrics = evaluate(frame)
         pairs = paired_years(frame)
         thresholds = np.quantile(pairs["target_claims"], [.2, .4, .6, .8])
+        qualified_keys, selection = consistent_drugs(frame, metrics, thresholds)
+        metrics["publication_selection"] = selection
         metrics["publication_thresholds_claims"] = [float(value) for value in thresholds]
         current = frame[frame["year"] == source_year].copy()
+        current = current[current["drug_key"].isin(qualified_keys)].copy()
         if current.empty:
             raise ValueError("CMS Part D source has no latest-year drugs")
         current["demand_state"] = np.digitize(current["demand_claims"], thresholds)
+        current["selection_tier"] = current["drug_key"].map(qualified_keys)
         years = manifest.get("years") or []
         urls = manifest.get("source_urls") or []
         actual_years = sorted(int(year) for year in frame["year"].unique())
@@ -174,9 +273,10 @@ def refresh_demand_baseline() -> dict:
                     (run_hash, source_sha, source_year, target_year, finished,
                      SOURCE_KIND, source_url, json.dumps(metrics), len(current)))
                 db.executemany("""INSERT INTO demand_forecasts
-                    (run_hash, drug_key, demand_state, observed_claims)
-                    VALUES (?, ?, ?, ?)""",
-                    [(run_hash, row.drug_key, int(row.demand_state), float(row.demand_claims))
+                    (run_hash, drug_key, demand_state, observed_claims, selection_tier)
+                    VALUES (?, ?, ?, ?, ?)""",
+                    [(run_hash, row.drug_key, int(row.demand_state), float(row.demand_claims),
+                      row.selection_tier)
                      for row in current.itertuples()])
                 inserted = len(current)
             elif (json.loads(existing["metrics_json"]).get("publication_thresholds_claims")
@@ -207,7 +307,7 @@ def refresh_demand_baseline() -> dict:
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?)""",
                     (row_hash, uid, finished[:10], f"{source_year}-12-31",
                      int(row.demand_state), finished, finished,
-                     "evaluated_two_year_claim_state_projection;not_dispensing",
+                     f"evaluated_two_year_claim_state_projection;selection_tier={row.selection_tier};not_dispensing",
                      str(target_year), SOURCE_KIND, source_url))
                 signal_rows += db.total_changes - before
             db.execute("""UPDATE refresh_runs SET finished_at=?, status='success',

@@ -9,6 +9,7 @@ const REFRESH_MS = 5 * 60_000
 type Definition = {
   id: string
   signal_id: string
+  cadence: string
   unit: string | null
   source_name: string | null
   source_url: string | null
@@ -94,7 +95,7 @@ export default function SourceSignalTable() {
       {catalog?.signals.map(definition => {
         const value = latest[definition.id]
         return <tr key={definition.id}>
-          <td className="px-6 py-3"><p className="font-medium text-ink">{definition.signal_id.replace(/_/g, ' ')}</p><p className="mt-1 text-xs text-slate-500">{definition.geography_id} · {definition.source_name ?? 'Public source'}</p><p className="mt-1 font-mono text-xs text-slate-500">{definition.id}</p>{(value?.source_url || definition.source_url) && <a className="mt-1 inline-flex items-center gap-1 text-xs text-primary-800 underline" href={value?.source_url || definition.source_url || undefined} target="_blank" rel="noopener noreferrer">Source <ArrowUpRight className="h-3 w-3" /></a>}</td>
+          <td className="px-6 py-3"><p className="font-medium text-ink">{definition.signal_id.replace(/_/g, ' ')}</p><p className="mt-1 text-xs text-slate-500">{definition.geography_id} · {definition.cadence.replace(/_/g, ' ')} · {definition.source_name ?? 'Public source'}</p><p className="mt-1 font-mono text-xs text-slate-500">{definition.id}</p>{(value?.source_url || definition.source_url) && <a className="mt-1 inline-flex items-center gap-1 text-xs text-primary-800 underline" href={value?.source_url || definition.source_url || undefined} target="_blank" rel="noopener noreferrer">Source <ArrowUpRight className="h-3 w-3" /></a>}</td>
           <td className="px-6 py-3 font-medium text-ink">{value ? displayValue(value.value, definition.unit) : 'No usable value'}{value?.data_quality?.includes('publication_time_unknown') && <p className="mt-1 text-xs font-normal text-amber-800">Publication time unknown</p>}</td>
           <td className="px-6 py-3 text-slate-700">{value?.observation_date ?? '—'}</td>
           <td className="px-6 py-3 text-slate-600">{value?.source_timestamp ? utcDateTime(value.source_timestamp) : 'Unknown'}</td>

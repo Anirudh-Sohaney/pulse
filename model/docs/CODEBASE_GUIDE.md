@@ -31,6 +31,7 @@ grain.
 
 | Module | Responsibility |
 |---|---|
+| `synthetic_horizon_xgb.py` | Per-drug direct 1/7/14/30-day synthetic-unit XGBoost comparison, selected signals, and saved boosters; research-only availability assumptions |
 | `config.py` | Repository paths and artifact directories |
 | `io.py` | Checked CSV/JSON reads, writes, and metadata |
 | `entities.py` | Drug normalization and FDA identity mapping |

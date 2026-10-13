@@ -1,5 +1,16 @@
 # Multi-Drug / Disease Expansion Status
 
+> **2026-10-11 synthetic experiment:** The repository now has trained direct
+> 1-, 7-, 14-, and 30-day future-unit XGBoost models for 30 synthetic pharmacy
+> drugs, each compared to sales-only. Signal lift is present on pooled 1-day
+> and 30-day targets but absent on pooled 7-day and 14-day targets. See
+> [`../comparison.md`](../comparison.md). This does not qualify the real
+> annual Part D claims data as a daily dispensing target.
+
+> Historical research status. The current website publishes 1,018 selected
+> two-year Part D claims-state projections; the 1,324-row news-conditioned
+> artifact below is retained as research history and is not a live output.
+
 Updated 2026-09-14.
 
 ## Strongest current path
@@ -176,12 +187,15 @@ The existing dated 20-column NLP signal surface was aggregated by year with a
 log1p transform and evaluated on the full CMS panel. Training and validation
 were chronological, with feature year *t* predicting demand in *t+1*; the
 three test feature years were 2021--2023 (targets 2022--2024). Across 1,368
-generic-drug targets and 3,575 held-out rows, history-only scored 68.50%
-exact / 69.25% balanced five-state accuracy. The news model scored 80.64% /
-80.96%, using validation-selected regularization. This is a qualifying
-prototype result and demonstrates incremental news value, although the target
-is annual CMS Part D demand rather than direct pharmacy dispensing or
-inventory. The reproducible artifact is
+generic-drug targets and 3,575 held-out rows, the original history baseline
+used a fixed ridge penalty and scored 68.50% exact / 69.25% balanced
+five-state accuracy. The news model selected its penalty on validation and
+scored 80.64% / 80.96%. That comparison gave the history baseline less tuning.
+The restored evaluator tunes both on the same validation folds: history-only
+scores 82.43% / 82.81%, above history plus news at 80.64% / 80.96%. News
+therefore does not add measured value in this annual Part D proxy experiment.
+The target is annual CMS claims, not direct pharmacy dispensing or inventory.
+The reproducible artifact is
 `model/artifacts/evaluation/cms_partd_full_news_metrics.json`; the runner is
 `model/scripts/evaluate_cms_partd_news.py`.
 

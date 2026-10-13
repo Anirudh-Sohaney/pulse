@@ -28,7 +28,7 @@ IDENTITY_FIELDS = (
 )
 COLLAPSED_DIMENSION_SIGNALS = set()
 MAX_HISTORY_SOURCE_ROWS = 10_000
-SIGNAL_SCHEMA_VERSION = 3
+SIGNAL_SCHEMA_VERSION = 6
 SEED_DEFINITION_COUNT = 1250
 SEED_HISTORICAL_RECORD_COUNT = 1950
 SEED_DEFINITIONS_PATH = (Path(__file__).resolve().parents[1] / "catalog" /
@@ -36,6 +36,15 @@ SEED_DEFINITIONS_PATH = (Path(__file__).resolve().parents[1] / "catalog" /
 NEWS_VERSION_FIELDS = ("url_hash", "source_name", "title", "url", "source",
                        "source_timestamp", "timestamp_kind", "relevance_score",
                        "matched_terms", "summary_text")
+# These optional, rate-limited source enrichments can fail without affecting
+# the validity or availability of the independently stored signal families.
+NON_BLOCKING_REFRESH_SOURCE_PREFIXES = ("bls_public_api_v1",)
+
+
+def is_non_blocking_refresh_source(source_name: str) -> bool:
+    """Whether a failed optional enrichment should affect displayed coverage."""
+    return any(source_name == prefix or source_name.startswith(prefix + "_")
+               for prefix in NON_BLOCKING_REFRESH_SOURCE_PREFIXES)
 
 
 def news_version_hash(fields: dict) -> str:
@@ -44,7 +53,7 @@ def news_version_hash(fields: dict) -> str:
     payload = json.dumps(content, sort_keys=True, ensure_ascii=False,
                          separators=(",", ":")).encode("utf-8")
     return hashlib.sha256(payload).hexdigest()
-PUBLISHABLE_DRUG_SOURCE_KIND = "cms_partd_two_year_persistence_v2"
+PUBLISHABLE_DRUG_SOURCE_KIND = "cms_partd_two_year_tiered_v4"
 NEWS_BRIDGE_SHA256 = "7981884ee0f45fc9f73dc777781e80b542d48716550cf1ac6a742c152ee648f6"
 
 
@@ -92,6 +101,12 @@ def initialize() -> None:
             _initialize_schema_v2()
         if version < 3:
             _initialize_schema_v3()
+        if version < 4:
+            _initialize_schema_v4()
+        if version < 5:
+            _initialize_schema_v5()
+        if version < 6:
+            _initialize_schema_v6()
         with connect() as db:
             db.execute(f"PRAGMA user_version={SIGNAL_SCHEMA_VERSION}")
 
@@ -325,6 +340,121 @@ def _initialize_schema_v3() -> None:
         );
         CREATE INDEX IF NOT EXISTS idx_enforcement_generation_end
           ON enforcement_snapshot_generations(window_end DESC, retrieved_at DESC);
+        """)
+
+
+def _initialize_schema_v4() -> None:
+    """Correct FDA rolling-window cadence without changing source periods."""
+    source_kind = "openfda_drug_enforcement"
+    classes = {"class_i": "Class I", "class_ii": "Class II",
+               "class_iii": "Class III", "not_yet_classified": "Not Yet Classified"}
+    with connect() as db:
+        snapshot_counts: dict[str, dict[str, int]] = {}
+        old_definitions = db.execute("""SELECT * FROM signal_definitions
+            WHERE signal_origin='model_external_state_feature'
+              AND signal_id='fda_enforcement_report_count_30d'
+              AND cadence='weekly'""").fetchall()
+        for old in old_definitions:
+            identity = {field: old[field] for field in IDENTITY_FIELDS}
+            identity["cadence"] = "rolling_30d"
+            new_uid = signal_uid(identity)
+            db.execute("""INSERT OR IGNORE INTO signal_definitions
+                (id, signal_origin, signal_id, cadence, geography_level,
+                 geography_id, entity_key, unit, source_name, source_url,
+                 state_definition, model_output_type)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (new_uid, *(identity[field] for field in IDENTITY_FIELDS),
+                 old["unit"], old["source_name"], old["source_url"],
+                 old["state_definition"], old["model_output_type"]))
+            records = db.execute("SELECT * FROM signal_records WHERE signal_uid=?",
+                                 (old["id"],)).fetchall()
+            for row in records:
+                quality = row["data_quality"] or ""
+                match = re.search(r"(?:^|;)source_last_updated=(\d{4}-\d{2}-\d{2})(?:;|$)",
+                                  quality)
+                if (row["source_kind"] != source_kind or match is None
+                        or match.group(1) != row["observation_date"]):
+                    raise ValueError("FDA enforcement cadence migration found an unsupported row")
+                period = row["observation_date"]
+                if period not in snapshot_counts:
+                    generation = db.execute("""SELECT id, row_count
+                        FROM enforcement_snapshot_generations
+                        WHERE window_end=? AND source_last_updated=?
+                        ORDER BY id DESC LIMIT 1""", (period, period)).fetchone()
+                    if generation is None:
+                        raise ValueError("FDA enforcement cadence migration has no report snapshot")
+                    counts = dict(db.execute("""SELECT r.classification, COUNT(*)
+                        FROM enforcement_snapshot_generation_rows link
+                        JOIN enforcement_snapshot_rows r ON r.row_hash=link.row_hash
+                        WHERE link.generation_id=? GROUP BY r.classification""",
+                        (generation["id"],)).fetchall())
+                    if sum(counts.values()) != generation["row_count"]:
+                        raise ValueError("FDA enforcement cadence migration has an incomplete snapshot")
+                    counts["Total"] = generation["row_count"]
+                    snapshot_counts[period] = counts
+                label = old["entity_key"].removeprefix("openfda_enforcement_class:")
+                classification = "Total" if label == "total" else classes.get(label)
+                if (classification is None or
+                        row["value"] != snapshot_counts[period].get(classification, 0)):
+                    raise ValueError("FDA enforcement cadence migration count disagrees with reports")
+                digest_input = [source_kind, new_uid, period, match.group(1), row["value"]]
+                new_hash = hashlib.sha256(json.dumps(
+                    digest_input, separators=(",", ":")).encode()).hexdigest()
+                db.execute("""INSERT OR IGNORE INTO signal_records
+                    (row_hash, signal_uid, signal_date, observation_date, value,
+                     source_timestamp, ingested_at, data_quality, missingness,
+                     forecast_horizon, source_kind, source_url)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (new_hash, new_uid, row["signal_date"], row["observation_date"],
+                     row["value"], row["source_timestamp"], row["ingested_at"],
+                     row["data_quality"], row["missingness"],
+                     row["forecast_horizon"], row["source_kind"], row["source_url"]))
+                copied = db.execute("""SELECT signal_uid, observation_date, value,
+                    source_timestamp, ingested_at, data_quality FROM signal_records
+                    WHERE row_hash=?""", (new_hash,)).fetchone()
+                if copied is None or tuple(copied) != (
+                        new_uid, row["observation_date"], row["value"],
+                        row["source_timestamp"], row["ingested_at"], row["data_quality"]):
+                    raise ValueError("FDA enforcement cadence migration did not preserve a row")
+            db.execute("DELETE FROM signal_records WHERE signal_uid=?", (old["id"],))
+            db.execute("DELETE FROM signal_definitions WHERE id=?", (old["id"],))
+
+
+def _initialize_schema_v5() -> None:
+    """Record the evidence tier for newly published drug projections."""
+    with connect() as db:
+        columns = {row[1] for row in db.execute("PRAGMA table_info(demand_forecasts)")}
+        if "selection_tier" not in columns:
+            db.execute("""ALTER TABLE demand_forecasts ADD COLUMN selection_tier TEXT
+                NOT NULL DEFAULT 'archived'""")
+
+
+def _initialize_schema_v6() -> None:
+    """Persist daily XGBoost outlook snapshots separately from source signals."""
+    with connect() as db:
+        db.executescript("""
+        CREATE TABLE IF NOT EXISTS demand_signal_outlook_runs (
+            run_date TEXT PRIMARY KEY,
+            created_at TEXT NOT NULL,
+            model_version TEXT NOT NULL,
+            artifact_trained_at TEXT,
+            source_signal_count INTEGER NOT NULL,
+            drug_count INTEGER NOT NULL,
+            summary_json TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS demand_signal_outlook (
+            run_date TEXT NOT NULL REFERENCES demand_signal_outlook_runs(run_date),
+            drug_name TEXT NOT NULL,
+            predicted_units_14d REAL NOT NULL,
+            trailing_baseline_units_14d REAL NOT NULL,
+            relative_change REAL,
+            demand_level TEXT NOT NULL,
+            signal_count INTEGER NOT NULL,
+            signals_json TEXT NOT NULL,
+            PRIMARY KEY(run_date, drug_name)
+        );
+        CREATE INDEX IF NOT EXISTS idx_demand_signal_outlook_date
+          ON demand_signal_outlook(run_date DESC, relative_change DESC);
         """)
 
 
@@ -784,7 +914,8 @@ def freshness() -> dict:
         except ValueError:
             pass
     failed_sources = [row["source_name"] for row in source_checks
-                      if row["last_status"] == "failed"]
+                      if row["last_status"] == "failed"
+                      and not is_non_blocking_refresh_source(row["source_name"])]
     if news_model_run is None:
         news_model_status = "not_configured"
         news_model_reason = "no_shadow_inference_run_recorded"
@@ -821,8 +952,20 @@ def freshness() -> dict:
 
 
 def seed_coverage_summary() -> dict:
-    """Separate usable recorded values from cadence-aware recent periods."""
+    """Report the seeded outputs selected for current publication."""
     definitions = seed_definitions()
+    with connect() as db:
+        latest_run = db.execute("""SELECT run_hash FROM demand_forecast_runs
+            WHERE method=? ORDER BY target_year DESC, created_at DESC LIMIT 1""",
+            (PUBLISHABLE_DRUG_SOURCE_KIND,)).fetchone()
+        published_drugs = ({row[0] for row in db.execute("""SELECT drug_key
+            FROM demand_forecasts WHERE run_hash=?""", (latest_run["run_hash"],))}
+            if latest_run else set())
+    if latest_run:
+        definitions = [row for row in definitions
+                       if not row["signal_id"].startswith("arkansas_atc_demand_state::")
+                       and (not row["signal_id"].startswith("cms_part_d_demand_state::")
+                            or row["entity_key"] in published_drugs)]
     ids = [row["id"] for row in definitions]
     cadence_by_id = {row["id"]: row["cadence"] for row in definitions}
     usable_rows = values(ids, latest_only=True)
@@ -867,6 +1010,8 @@ def seed_coverage_summary() -> dict:
         reason_counts[reason] = reason_counts.get(reason, 0) + 1
     return {
         "as_of_date": today.isoformat(),
+        "scope": "selected_seed_outputs" if latest_run else "historical_seed_manifest",
+        "seed_manifest_id_count": SEED_DEFINITION_COUNT,
         "seeded_id_count": len(ids),
         "seeded_ids_with_usable_latest_value": len(usable_ids),
         "seeded_ids_with_recent_period_value": len(recent_ids),
@@ -880,10 +1025,12 @@ def seed_coverage_summary() -> dict:
             "annual_observation_max_lag_days": 400,
             "demand_output_min_target_year": today.year,
         },
-        "note": ("Usable means a dated value passes source and identity gates, not that "
-                 "its source observation is recent. Current-target projections are counted "
-                 "separately from recent source observations. Recency thresholds are display "
-                 "filters, not proof of upstream publication completeness."),
+        "note": ("After a consistency-selected drug run, coverage includes its selected "
+                 "seeded drug IDs and the 20 archived news IDs; legacy ATC and unselected "
+                 "drug IDs remain available as history. Usable means a dated value passes "
+                 "source and identity gates, not that its source observation is recent. "
+                 "Current-target projections are counted separately from recent source "
+                 "observations. Recency thresholds do not prove upstream completeness."),
     }
 
 
@@ -909,7 +1056,7 @@ def gap_report() -> dict:
             MAX(CASE WHEN r.source_kind NOT IN ('historical_catalog',
                        'article_text_ridge_shadow_v1') THEN r.observation_date END)
                 AS latest_live_observation_date,
-            MAX(CASE WHEN r.source_kind='cms_partd_two_year_persistence_v2'
+            MAX(CASE WHEN r.source_kind='cms_partd_two_year_tiered_v4'
                      THEN r.forecast_horizon END) AS latest_baseline_target_year,
             MAX(r.forecast_horizon) AS latest_forecast_horizon
             FROM signal_definitions d LEFT JOIN signal_records r ON r.signal_uid=d.id
@@ -948,11 +1095,11 @@ def demand_drugs(*, search: str = "", limit: int = 100, offset: int = 0) -> dict
     with connect() as db:
         run = db.execute("""SELECT run_hash, source_year, target_year, created_at,
             method, metrics_json FROM demand_forecast_runs
-            WHERE method='cms_partd_two_year_persistence_v2'
+            WHERE method='cms_partd_two_year_tiered_v4'
             ORDER BY target_year DESC, created_at DESC LIMIT 1""").fetchone()
         if run:
             rows = [dict(row) for row in db.execute("""SELECT d.id,
-                f.drug_key AS drug_name, f.demand_state,
+                f.drug_key AS drug_name, f.demand_state, f.selection_tier,
                 f.observed_claims, ? AS observation_date,
                 ? AS forecast_horizon, ? AS source_timestamp,
                 '0=Lowest to 4=Highest relative annual CMS Part D claims category' AS state_definition
@@ -960,7 +1107,8 @@ def demand_drugs(*, search: str = "", limit: int = 100, offset: int = 0) -> dict
                 LEFT JOIN signal_definitions d ON d.signal_origin='derived_demand_output'
                   AND d.signal_id='cms_part_d_demand_state::' || f.drug_key
                 WHERE f.run_hash=? AND (?='' OR instr(lower(f.drug_key), lower(?))>0)
-                ORDER BY f.demand_state DESC, f.observed_claims DESC, f.drug_key
+                ORDER BY CASE f.selection_tier WHEN 'high_history' THEN 0 ELSE 1 END,
+                    f.demand_state DESC, f.observed_claims DESC, f.drug_key
                 LIMIT ? OFFSET ?""",
                 (f"{run['source_year']}-12-31", str(run["target_year"]),
                  run["created_at"], run["run_hash"], search, search,
@@ -976,9 +1124,10 @@ def demand_drugs(*, search: str = "", limit: int = 100, offset: int = 0) -> dict
                     "source_year": run["source_year"], "target_year": run["target_year"],
                     "method": run["method"], "evaluation": {
                         "fold_count": metrics["fold_count"],
-                        "mean_balanced_accuracy": metrics["mean_balanced_accuracy"]},
+                        "mean_balanced_accuracy": metrics["mean_balanced_accuracy"],
+                        **metrics.get("publication_selection", {})},
                     "state_thresholds_claims": metrics.get("publication_thresholds_claims"),
-                    "meaning": "Two-year persistence projection of five relative Arkansas Medicare Part D claims categories. Source claims are annual and two years old; this is not current dispensing, pharmacy inventory, or medication units."}
+                    "meaning": "Two-year persistence projection of five relative Arkansas Medicare Part D claims categories. High-history and stable-far-from-cutoff tiers carry different retrospective evidence. Source claims are annual and two years old; this is not current dispensing, pharmacy inventory, or medication units."}
     return {"drugs": [], "count": 0, "total": 0, "filtered_total": 0,
             "status": "evaluated_baseline_not_available",
             "meaning": "No evaluated drug ranking has been recorded yet. Historical catalog outputs remain available through signal history."}

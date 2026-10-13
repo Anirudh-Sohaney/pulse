@@ -1,0 +1,9 @@
+# Apply after docker-compose.yml and docker-compose.cloud.yml. The host runs
+# Nginx and Certbot; Caddy remains available for other cloud deployments.
+services:
+  caddy:
+    profiles: [caddy]
+
+  backend:
+    environment:
+      TRUSTED_PROXY_HOSTNAMES: '["frontend"]'

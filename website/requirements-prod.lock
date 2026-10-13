@@ -26,9 +26,11 @@ python-dotenv==1.2.2
 PyJWT==2.15.1
 python-multipart==0.0.32
 pytz==2026.4
+scipy==1.18.0
 six==1.17.0
 starlette==1.7.0
 typing-extensions==4.16.0
 typing-inspection==0.4.4
 tzdata==2026.5
 uvicorn==0.51.0
+xgboost-cpu==3.4.1

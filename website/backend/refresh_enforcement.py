@@ -138,7 +138,7 @@ def _persist_enforcement_signals(db, records: list[dict], *, window_start: str,
         entity_key = "openfda_enforcement_class:" + label
         before = db.total_changes
         uid = ensure_source_definition(
-            db, signal_id=SIGNAL_ID, cadence="weekly", geography_level="national",
+            db, signal_id=SIGNAL_ID, cadence="rolling_30d", geography_level="national",
             geography_id="US", entity_key=entity_key, unit="reports",
             source_name=f"FDA drug enforcement reports: {classification}",
             source_url=SOURCE_URL, state_definition=STATE_DEFINITION)

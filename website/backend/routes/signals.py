@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, timezone
 from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 from .. import signal_store
+from .. import short_horizon_research
 
 router = APIRouter()
 SignalId = Annotated[str, StringConstraints(min_length=1, max_length=64)]
@@ -79,7 +80,7 @@ def latest(query: LatestQuery):
                         "reason": ("conflicting_latest_revision" if uid in conflicting_ids else
                                    coverage[uid]["gap_status"] if uid in coverage else "unknown_id"),
                         "last_recorded_period": (coverage[uid]["latest_observation_date"]
-                                                 if uid in coverage else None)}
+                                     if uid in coverage else None)}
                        for uid in missing_ids]
     return {"values": rows, "latest_recorded_values": recorded,
             "unusable_recorded_values": archived,
@@ -87,6 +88,41 @@ def latest(query: LatestQuery):
             "missing_details": missing_details,
             "ambiguous_ids": sorted({row["id"] for row in [*rows, *recorded]
                                      if row["ambiguous"]})}
+
+
+@router.get("/today")
+def today(limit: int = Query(1500, ge=1, le=1500), offset: int = Query(0, ge=0)):
+    """Return a point-in-time snapshot of the latest usable value per signal."""
+    definitions = signal_store.list_signals(limit=limit, offset=offset)
+    ids = [row["id"] for row in definitions]
+    values = signal_store.values(ids, latest_only=True) if ids else []
+    recorded = signal_store.values(ids, latest_only=True, include_unusable=True) if ids else []
+    return {"as_of": datetime.now(timezone.utc).isoformat(),
+            "snapshot_date": date.today().isoformat(),
+            "values": values, "count": len(values),
+            "latest_recorded_values": recorded,
+            "unusable_recorded_values": [row for row in recorded if not row["usable"]],
+            "recorded_count": len(recorded), "catalog_count": signal_store.count_signals(),
+            "offset": offset,
+            "note": "values contains the latest usable stored values. latest_recorded_values also includes recorded shadow and archived rows, identified by usable=false. Values are not necessarily observations published today; each row retains its source observation date and source timestamp, and missing values are not imputed."}
+
+
+@router.get("/demand/outlook")
+def demand_outlook(run_date: date | None = Query(None, alias="date"),
+                   days: int = Query(1, ge=1, le=90)):
+    """Retired: public synthetic forecasts cannot use frozen private-sales features."""
+    raise HTTPException(410, detail=(
+        "The public daily outlook was retired because its pharmacy-sales inputs were "
+        "frozen synthetic history. Use /demand/horizon-study for benchmark results "
+        "or train on current private sales in the browser workspace."))
+
+
+@router.get("/demand/horizon-study")
+def demand_horizon_study(drug_name: str | None = None):
+    """Return the local synthetic 1/7/14/30-day benchmark, not live forecasts."""
+    if drug_name is not None and len(drug_name) > 120:
+        raise HTTPException(422, detail="drug_name is too long")
+    return short_horizon_research.study(drug_name)
 
 
 @router.post("/history")
@@ -117,7 +153,7 @@ def coverage():
 
 @router.get("/coverage/summary")
 def coverage_summary():
-    """Return usable-value coverage for the exact 1,250-ID seed catalog."""
+    """Return usable-value coverage for currently selected seeded outputs."""
     return signal_store.seed_coverage_summary()
 
 

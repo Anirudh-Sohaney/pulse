@@ -1,5 +1,18 @@
 # MediTrack Revised Project Goal
 
+> **Short-horizon research update (2026-10-11):** A separate synthetic
+> pharmacy experiment now trains next-1/7/14/30-day recorded-unit models for
+> 30 drugs with five selected historical signals per drug/horizon. Signal lift
+> is mixed by horizon, and historical signal publication times are incomplete.
+> See [`../comparison.md`](../comparison.md). This experiment does not replace
+> the annual public Part D claims-state surface or validate real pharmacy
+> demand predictions.
+
+> Research goal and historical model context. The current website publishes
+> 1,018 selected Part D claims-state projections through a separate baseline.
+> The 1,324-row news-conditioned research artifact discussed below is retained
+> for analysis and is not a live output.
+
 ## Scope
 
 MediTrack converts freely accessible, real-time-usable information into a
@@ -32,19 +45,23 @@ contract below. Every claim still requires real historical data, chronological
 held-out testing, per-target counts, baselines, and a logged promotion
 decision.
 
-The current CMS annual Arkansas state-by-generic-drug result meets the
-multi-drug state-accuracy scale as a demand proxy. A new full-panel,
-news-enabled evaluation covers 1,368 generic drugs and 3,575 held-out rows;
-the 20 NLP-signal model reaches 80.64% exact / 80.96% balanced five-state
-accuracy versus 68.50% / 69.25% history-only. A chronology-safe FDA shortage
-screen now provides 12
+The CMS annual Arkansas state-by-generic-drug evaluation covers 1,368 generic
+drugs and 3,575 held-out rows. Its first history-only comparison fixed the
+ridge penalty at 10, while the news model selected its penalty on validation;
+that produced 68.50% exact / 69.25% balanced for history and 80.64% / 80.96%
+for history plus news. The restored evaluator now tunes both models on the
+same validation folds. Tuned history-only reaches 82.43% / 82.81%, above
+history plus news at 80.64% / 80.96%, so the annual CMS result does not show
+incremental news value. It remains a demand proxy, not pharmacy dispensing.
+A chronology-safe FDA shortage screen now provides 12
 generic/formulation supply-proxy labels at 98.39% within-5% accuracy across
 4,245 held-out next-month transitions. The FDA regression, persistence, and
 existing NumPy neural paths all tie; that target remains persistence-dominated.
-The CMS annual result above is the current news-enabled prototype candidate.
-Its runner also materializes 1,324 Arkansas generic-drug signals for the 2025
-forecast year from 2024 observations; these remain demand proxies rather than
-direct inventory forecasts.
+The annual CMS forecast remains a claims-state research surface; the news
+features are not promoted as incrementally useful. Its runner materializes
+1,324 Arkansas generic-drug signals for the 2025 forecast year from 2024
+observations; these remain demand proxies rather than direct inventory
+forecasts.
 
 The same evaluator now also reports direct learned models without the
 persistence fallback: history-only ridge reaches 83.85% within-5% accuracy and

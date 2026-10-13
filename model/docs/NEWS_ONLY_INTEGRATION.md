@@ -7,6 +7,17 @@ materialize it under `model/artifacts/news/`. It has 97 monthly rows from
 2018-01 through 2026-01. The adapter validates its exact schema, dates, and
 numeric values before loading it.
 
+Two pairs of columns are identical in all 97 months:
+`national_policy_risk`/`national_policy_direction` and
+`national_supply_chain_risk`/`national_supply_stage_direction`. They remain
+named aliases in the historical 20-output contract, not independent evidence.
+The website shadow runner enforces equality for both pairs and rejects
+estimates outside each signal's 97-month archived range. The older
+1,324-drug research model annualized these 20 columns as features; the current
+website ranking is a separate 1,018-drug claims-persistence selection and does
+not consume them. The current article-text shadow estimates cannot establish
+that the original intermediate outputs are accurate or suitable for live use.
+
 The current `model/arkansas_pharma_signal/` package contains substantial
 working model code: source adapters, learned text-relevance and event-state
 components, demand and shortage models, chronological evaluators, and forecast
@@ -53,8 +64,12 @@ An additional `model_report.md` survives only in an unreachable Git tree
 (`9bf3831da6654d3632dbb1287df2066c97cfb381`); it repeats the 1,406-output claim
 and reports 80.64% exact / 80.96% balanced CMS accuracy. The report's referenced
 validation files are absent, and its count conflicts with the 1,250 rows in the
-archived JSON. Treat those metrics as unverified historical claims, not a
-production evaluation.
+archived JSON. The 80.64% / 80.96% score is now computationally reproducible
+with `model/scripts/evaluate_cms_partd_news.py`, but the original history
+baseline used fixed regularization while the news model tuned it on validation.
+With the same validation tuning for both, history-only reaches 82.43% / 82.81%,
+above history plus news. The old comparison therefore does not establish
+incremental news value or validate the original article generator.
 The current `model/prod_pipeline.py` therefore remains fail-closed while the
 live-input and point-in-time path is rebuilt around the available model code.
 
@@ -90,17 +105,31 @@ the monthly rows. A live replacement requires a versioned acquisition and
 inference pipeline, source timestamps, and chronological evaluation before it
 can be promoted to the public latest endpoint.
 
-The rebuild under `model/rebuilt_demand/` adds a local temporal model that
-forecasts the same 20 IDs from their archived histories. Its values can be
-merged into the 1,312-signal catalog at their declared month end for the local
-synthetic-demand forecast. This is a schema-compatible replacement, not the
-historical article-to-signal generator. A separate GDELT corpus is available
-under `data/targeted_additions/news_article_corpus/`: it has 354 records, 292
-full-text records, but only 10 distinct publication months from 2023-10 to
-2025-12. The monthly 20-column artifact has 97 rows and no per-article target
-labels, so the text corpus is too sparse to support a defensible news-based
-replacement without more monthly coverage and stronger signal-label
-provenance. The 14-day pharmacy-demand benchmark and its current holdout
+The former `model/rebuilt_demand/` directory, which held a temporal
+replacement and a 90-configuration synthetic XGBoost comparison, was removed
+in commit `77c9427`. Its source trainer and saved per-drug models are not in
+this checkout. The preserved comparison is in `model/comparison.md`; the
+current fixed-recipe event-window evaluator is
+`model/scripts/evaluate_synthetic_event_windows.py`. The 20
+historical columns are present in the 1,312-signal benchmark input, but they
+are archived outputs, not recoverable article-level training labels.
+
+The separate GDELT corpus under
+`data/targeted_additions/news_article_corpus/` has 354 records, 292 full-text
+records, and only 10 distinct publication months from 2023-10 to 2025-12.
+
+The Arkansas 3DLNews2 archive is now hydrated locally from its documented
+Globus source. It has 13,689 records, including 8,035 with article content and
+6,647 with publication dates. Dated title or body text is present in all 60
+months from 2018-01 through 2022-12, aligning with 60 rows of the 97-month
+archived 20-output table. This expands historical article coverage, but the
+articles come from a different corpus than the captured production feeds and
+the 20-column table contains model outputs rather than independent ground
+truth. A chronological TF-IDF/Ridge prototype reduced pooled WAPE versus
+last-month persistence on its three expanding holdouts, but errors remained
+high (66–75% versus 87–105% for persistence). The corpus can support further
+research; those results do not validate or replace the current ten-month
+shadow artifact. The 14-day pharmacy-demand benchmark and its current holdout
 results are documented in `model/comparison.md`.
 
 The GDELT DOC API is not a reliable way to fill the missing article-text
@@ -115,16 +144,16 @@ an independently sourced, legally usable article archive with dated text and
 provenance; current-page re-fetches of old URLs are not equivalent training
 evidence.
 
-The rebuild also records an exploratory TF-IDF/Ridge article-to-output fit in
-`model/rebuilt_demand/train_news_text.py`. It scored 11.91% pooled WAPE on its
-last two matched months versus 87.07% for persistence, but only 10 monthly
-examples were available and the text is aggregated through month end. The
-saved fit is exported to `website/catalog/news_text_20_model.json.gz`. The
-worker prefers captured title/summary text for the latest closed month and
-falls back to an explicitly tagged current-month-to-date estimate targeted at
-month end. This gives the backend a real, reproducible shadow inference path;
-it does not recover the historical FLAN-T5 runner. The output uses the same
-IDs but remains excluded from usable latest values because the validation
-sample is too small and live summaries do not match its full-text training
-corpus. On 2026-10-09 it wrote 20 shadow rows from five captured FDA articles
-for the October month-end target; these are estimates, not October observations.
+The current website contains a TF-IDF/Ridge inference artifact at
+`website/catalog/news_text_20_model.json.gz` and an inference runner in
+`website/backend/`. It prefers captured title/summary text for the latest
+closed month and falls back to an explicitly tagged current-month-to-date
+estimate targeted at month end. It does not recover the historical FLAN-T5
+runner. Its ten matched months and mismatch between live summaries and the
+archived training text are too weak for promotion; outputs remain shadow-only
+and excluded from usable latest values. A previously recorded two-month text
+experiment score (11.91% pooled WAPE versus 87.07% for persistence) is
+exploratory and its original training/evaluation source is absent from the
+current checkout. On 2026-10-09 the backend wrote 20 shadow rows from five
+captured FDA articles for the October month-end target; these are estimates,
+not October observations.

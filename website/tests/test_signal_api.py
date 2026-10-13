@@ -64,6 +64,10 @@ def test_verified_news_bridge_backfills_only_missing_history(tmp_path, monkeypat
     assert latest["unusable_recorded_values"][0]["id"] == uid
     assert latest["unusable_recorded_values"][0]["usable"] is False
     assert latest["unusable_recorded_values"][0]["observation_date"] == "2026-01-31"
+    snapshot = client.get("/api/v1/signals/today?limit=1500").json()
+    recorded = next(row for row in snapshot["latest_recorded_values"] if row["id"] == uid)
+    assert recorded["usable"] is False
+    assert recorded["observation_date"] == "2026-01-31"
     changed = tmp_path / "changed-news.csv.gz"
     changed.write_bytes(NEWS_BRIDGE.read_bytes() + b"changed")
     with pytest.raises(ValueError, match="checksum mismatch"):
@@ -312,7 +316,7 @@ def test_latest_keeps_usable_revision_when_newer_legacy_revision_exists(tmp_path
             (uid, *definition.values()))
         for row_hash, value, source_time, source_kind in (
             ("evaluated", 3, "2026-09-01T00:00:00+00:00",
-             "cms_partd_two_year_persistence_v2"),
+             "cms_partd_two_year_tiered_v4"),
             ("legacy", 4, "2026-09-02T00:00:00+00:00", "historical_catalog"),
         ):
             db.execute("""INSERT INTO signal_records
@@ -323,7 +327,7 @@ def test_latest_keeps_usable_revision_when_newer_legacy_revision_exists(tmp_path
     client = TestClient(create_app())
     latest = client.post("/api/v1/signals/latest", json={"ids": [uid]}).json()
     assert [(row["value"], row["source_kind"]) for row in latest["values"]] == [
-        (3, "cms_partd_two_year_persistence_v2")]
+        (3, "cms_partd_two_year_tiered_v4")]
     assert latest["missing_ids"] == []
     history = client.post("/api/v1/signals/history", json={"ids": [uid]}).json()
     assert history["values"][0]["usable"] is False
@@ -402,7 +406,7 @@ def test_latest_exposes_newer_unvalidated_record_without_publishing_it(tmp_path,
              geography_id, entity_key) VALUES (?, ?, ?, ?, ?, ?, ?)""",
             (uid, *definition.values()))
         for row_hash, target, value, source_kind in (
-            ("validated", "2026", 3, "cms_partd_two_year_persistence_v2"),
+            ("validated", "2026", 3, "cms_partd_two_year_tiered_v4"),
             ("unvalidated", "2027", 4, "manual_refresh"),
         ):
             db.execute("""INSERT INTO signal_records

@@ -1,5 +1,16 @@
 # Target Availability Audit
 
+## Synthetic short-horizon study — 2026-10-11
+
+The local `data/synthetic_pharmacy_data/` panel has 30 drug series with daily
+recorded units sold from 2023 through 2025. A saved XGBoost comparison now
+targets future 1-, 7-, 14-, and 30-day unit totals. The 1,312 candidate signal
+series have period ends but incomplete historical publication timestamps, so
+their assumed one-day-after-period-end availability does not establish a valid
+real-time replay. Synthetic units sold are also not observed pharmacy demand
+or inventory. These targets are suitable for a capability benchmark only; see
+[`../comparison.md`](../comparison.md).
+
 ## Review note — 2026-09-14
 
 Target availability remains the limiting factor for strong claims. The

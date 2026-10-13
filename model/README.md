@@ -1,12 +1,53 @@
 # Arkansas Pharmaceutical Signal Model
 
-> **Checkout note (2026-10-10):** This document retains research results and
-> links for `rebuilt_demand/`, but that source directory is absent from this
+## Short-horizon synthetic pharmacy model (2026-10-11)
+
+`scripts/train_synthetic_horizon_xgb.py` now trains separate per-drug XGBoost
+models for the next **1, 7, 14, and 30 days of recorded units sold**. Each
+drug/horizon selects five distinct signal series from the 1,312-column archive
+using training-only correlation, then compares a sales-plus-signals model with
+a matched sales-only model. Three XGBoost profiles and two signal-lag layouts
+are selected on a purged chronological validation period; the final period is
+held out. The trained boosters and feature manifests are in
+`trained/synthetic_horizon_xgb_v1/`.
+
+| Future sales window | Signals pooled WAPE | Sales-only pooled WAPE | Validation-selected pooled WAPE |
+|---|---:|---:|---:|
+| 1 day | 42.34% | 43.57% | 42.30% |
+| 7 days | 29.69% | 28.66% | 29.54% |
+| 14 days | 30.66% | 30.02% | 30.66% |
+| 30 days | 30.72% | 32.70% | 28.85% |
+
+These results show feasibility on one deterministic synthetic pharmacy, with
+mixed evidence for signal lift by horizon. The archive records signal period
+ends but does not provide historical publication vintages; the benchmark's
+one-day-after-period-end availability is an assumption, not a verified replay.
+Its output is not a live Arkansas pharmacy prediction, and the 20 article
+signal IDs remain unvalidated shadow estimates. See [comparison.md](comparison.md)
+for protocol and interpretation.
+
+Run from the repository root with
+`PYTHONPATH=model website/.venv/bin/python model/scripts/train_synthetic_horizon_xgb.py`.
+Replay a saved booster on a held-out synthetic origin with
+`PYTHONPATH=model website/.venv/bin/python model/scripts/replay_synthetic_horizon_xgb.py "Acetaminophen 500 mg tablet" 1 2025-06-01`.
+The replay is an artifact check, not a current pharmacy forecast.
+
+> **Checkout note (2026-10-10):** This document retains research results for
+> `rebuilt_demand/`, but that source directory is absent from this
 > checkout and local HEAD. An earlier experimental version is in reachable
 > local Git history; its training and export commands cannot be run from this
 > checkout as written. The exported article inference artifact and
 > its shadow backend runner remain under `website/`; they are not validated
 > production demand outputs.
+
+> **Current website publication (2026-10-10):** The live website ranks 1,018
+> selected two-year Arkansas Medicare Part D claims-state projections in two
+> evidence tiers. This is
+> a separate, release-safe persistence path; it does not consume the archived
+> 20 news columns or the older 1,324-drug research forecast. The 20 archived
+> columns include two exact alias pairs, so they represent 18 distinct
+> historical series. The newer article-text runner preserves the 20-ID contract
+> as a shadow experiment and does not supply live ranking features.
 
 This directory contains the code, tests, research notes, and generated artifacts for an Arkansas-first system that builds public-data signals and evaluates forecasts related to pharmaceutical demand, disease pressure, drug shortages, recalls, and distribution. It combines data adapters, identity and geography mapping, time-aware feature construction, baseline and research models, chronological evaluation, and guarded output contracts.
 
@@ -14,59 +55,79 @@ The system is designed as a contextual signal layer for pharmacy and public-heal
 
 This README is the entry point to the codebase. The detailed evidence, source citations, target definitions, and contracts remain in `docs/` and in the data-source manifests under `../data/`.
 
-## Rebuilt 20-signal and 1,312-signal demand model
+## What the demand-signal evidence shows
 
-The local replacement workflow lives in [`rebuilt_demand/`](rebuilt_demand/). It is a clean, separately documented path alongside the existing Arkansas research package. It contains a temporal replacement for the archived 20 monthly outputs, a small article-text TF-IDF/Ridge fit, and a per-drug XGBoost demand model trained against the 1,312 dated catalog signals. The exact historical FLAN-T5 runner and checkpoint are still absent. The article-text fit has only ten matched publication months and a two-month holdout, so it is packaged to the backend as a quarantined shadow estimate, not a production demand signal. The 20-output temporal replacement remains a separate time-series forecast and does not claim to reproduce news understanding.
+The narrow version of the remembered result is correct: adding selected dated
+signals improved XGBoost accuracy on the repository's deterministic synthetic
+pharmacy panel. That proves the downstream model can use signals when they
+carry information. It does not prove the missing live article-to-20 generator
+or validate the same lift on real pharmacy sales.
 
-| Artifact | Location | Purpose |
-|---|---|---|
-| Training/evaluation code | `rebuilt_demand/train.py` | Builds leakage-safe features, compares 90 configurations, selects on validation, and evaluates the winner and fixed historical recipe on the final holdout. |
-| Initial 20-output models | `rebuilt_demand/models/initial_20_signals/*.json` | One XGBoost model per archived signal ID. |
-| Next-month 20-signal output | `rebuilt_demand/models/initial_20_signals/next_month_20_signals.csv` | Latest date plus the 20 predicted signal values. |
-| Experimental article model | `rebuilt_demand/train_news_text.py` and `rebuilt_demand/models/initial_20_signals/article_text_model.joblib` | TF-IDF/Ridge text-to-20-signal experiment; exploratory only, with 10 matched months and a 2-month holdout. |
-| Backend-safe article model | `website/catalog/news_text_20_model.json.gz` | Checksum-pinned vocabulary, IDF, and Ridge parameters exported from the local model artifact; the backend loads JSON rather than executable pickle data. |
-| Article model export | `rebuilt_demand/export_news_text_model.py` | Converts the trusted local joblib artifact into the backend's fixed inference contract. |
-| Article experiment results | `rebuilt_demand/article_text_20_signal_metrics.json` and `rebuilt_demand/article_text_20_signal_test_predictions.csv` | Reproducible scores and test predictions for the small article-text experiment. |
-| Selected demand models | `rebuilt_demand/models/demand_*.json` | One XGBoost model per synthetic drug series, using the validation-selected input/configuration. |
-| Selected-model contract | `rebuilt_demand/selected_demand_model.json` | Chosen configuration, dates, feature names, selected signals per drug, and output model location. |
-| Historical-recipe models | `rebuilt_demand/models/legacy_recipe/demand_*.json` | The fixed top-five 1/7/14-day recipe from the earlier benchmark, retrained with a 14-day boundary purge. |
-| Historical-recipe contract | `rebuilt_demand/legacy_recipe_demand_model.json` | Features and scores for the separately reproducible historical recipe. This is the default inference recipe. |
-| Initial 20-signal metrics | `rebuilt_demand/initial_20_metrics.json` | Chronological holdout scores per output versus persistence. |
-| All comparison results | `rebuilt_demand/comparison_results.csv` and `.json` | Validation results for every predeclared configuration and final-period scores for the selected model and its matched sales-only XGBoost baseline. |
-| Per-drug gains | `rebuilt_demand/selected_model_per_drug_test.csv` | Final-period WAPE, same-profile sales-only WAPE, and per-drug WAPE change. |
-| Historical per-drug gains | `rebuilt_demand/legacy_recipe_per_drug_test.csv` | Paired per-drug results for the historical recipe and matched sales-only baseline. |
-| Human-readable comparison | [`comparison.md`](comparison.md) | Protocol, all 90 configurations, final holdout, per-drug results, and limitations. |
+The fixed top-five-signal recipe uses each drug's previous sales and inventory
+features plus the five training-selected catalog signals at 1-, 7-, and 14-day
+lags. On the final 6,180 14-day forecast origins, the purged rerun scored
+29.27% pooled WAPE versus 31.96% for matched sales-only XGBoost, an 8.43%
+relative reduction; it improved WAPE for 18 of 30 drugs. A separate audit of
+the same purged recipe found 43.65% versus 49.43% WAPE on 2,256 origins whose
+target windows overlap injected outbreak/supply-response days, and 13.10%
+versus 12.32% on the other 3,924 origins. Thus the synthetic lift is stronger
+in its marked event windows and reverses outside them.
 
-The demand target is each drug's next 14 calendar days of synthetic units sold. The data are the deterministic single-clinic panel in `../data/synthetic_pharmacy_data/arkansas_clinic_daily_pharmacy_sales.csv` and the frozen dated signal table in `../test/test_Signals/signals_2023_2025.csv.gz`. Sales inputs include prior-day sales lags through 56 days, rolling means and standard deviations through 56 days, calendar terms, lagged price, and lagged stockout. Signal selection uses the first 60% of dates only; configuration selection uses the next 20%; the final 20% is held back for a final evaluation. A 14-day purge at both boundaries prevents a training target from including outcomes in the following period. Sales history uses observations through the forecast origin. Signal values are carried forward only after `period_end`, then lagged before they enter the forecast model. The synthetic event tags are never features.
+That pattern is partly built into the generator: it applies a next-month
+demand multiplier to acute-drug categories using the same frozen
+`national_supply_chain_risk` series supplied to the models. The value is
+available before the response month, so the timing is not future-data leakage;
+however, it makes this a conditional capability demonstration by design. Two
+signal IDs are exact aliases, so the 20 named news outputs represent 18
+distinct historical series. See [`comparison.md`](comparison.md), the
+generator in `../data/synthetic_pharmacy_data/`, and the event breakdown in
+`docs/synthetic_event_window_metrics.json`.
 
-Run from the repository root with the model environment installed:
+The earlier pre-registered benchmark reported 29.40% versus 32.35% WAPE on the
+same final period but did not purge the 14-day target at the train/test
+boundary. The purged fixed-recipe result above removes that boundary overlap.
+The separate 90-configuration grid's validation-selected winner scored
+32.87% WAPE versus 29.85% for its matched sales-only baseline, so that tuned
+winner did not improve the holdout. All synthetic results are single-site
+scenarios, not observed dispensing data.
+
+There is also a real-data annual CMS Part D evaluation over three chronological
+folds, covering 1,368 Arkansas generic-drug targets and 3,575 held-out
+drug-years. The saved comparison initially appeared to show lift: history
+with a fixed ridge penalty reached 68.50% exact / 69.25% balanced accuracy,
+while history plus news selected its penalty on validation and reached 80.64%
+/ 80.96%. That baseline was not tuned on the same terms. The restored evaluator
+now validation-tunes both: history-only reaches 82.43% / 82.81%, above the
+history-plus-news result. This does not show incremental value from news for
+the annual claims proxy. It also does not test weekly dispensing or
+inventory. The archived signal-generation process has unknown row-level
+article provenance, and its original FLAN-T5 runner and checkpoint are
+unavailable.
+
+The original `model/rebuilt_demand/` directory was removed in commit
+`77c9427`; its 90-grid training code and saved per-drug models are not in this
+checkout. The comparison report preserves those results. The pre-registered
+benchmark, fixed-recipe event audit, and annual CMS evaluator can currently be
+rerun from this tree.
+
+Reproduce the available comparisons from the repository root:
 
 ```bash
-python -m pip install -e ./model
-python model/rebuilt_demand/train.py
+python data/synthetic_pharmacy_data/evaluate_current_benchmark.py
+PYTHONPATH=model website/.venv/bin/python model/scripts/evaluate_synthetic_event_windows.py
+PYTHONPATH=model website/.venv/bin/python model/scripts/evaluate_cms_partd_news.py
 ```
 
-The run trains 90 configurations across 30 drug series, spanning feature sets, signal ranking lags, tree depth, estimator count, regularization, and squared-error, Poisson, Tweedie, and pseudo-Huber objectives. It selects the grid winner on validation WAPE, refits it on the first 80% of dates (with the final 14 training origins purged), and also retrains the fixed historical recipe into its separate model directory. Use `python model/rebuilt_demand/train.py --skip-20-signal` only when reusing an already trained initial 20-signal artifact. After training, produce next-14-day demand forecasts with the fixed historical recipe by default:
-
-```bash
-python model/rebuilt_demand/predict.py \
-  --sales data/synthetic_pharmacy_data/arkansas_clinic_daily_pharmacy_sales.csv \
-  --signals test/test_Signals/signals_2023_2025.csv.gz
-```
-
-The prediction command requires the same sales and dated-signal schemas as training, and the same drug series. It adds the latest 20-output model prediction to the 1,312-signal catalog at that forecast month's `period_end`, then makes per-drug demand predictions from the selected catalog inputs. Other catalog signals remain sourced from the supplied dated signal file. Its output labels itself as a synthetic-benchmark model. See [`comparison.md`](comparison.md) for measured results and cautions; all demand scores use synthetic data and do not establish accuracy on observed pharmacy sales.
-
-To run the 90-grid validation winner instead, add `--recipe validation-selected`. That candidate is preserved for comparison; it had the lowest validation WAPE but did not beat its matched sales-only model on the final period.
-
-The article-text experiment can be rerun with the development extras installed (`python -m pip install -e '.[dev]'` from `model/`) using `python model/rebuilt_demand/train_news_text.py`, then exported with `python model/rebuilt_demand/export_news_text_model.py --out website/catalog/news_text_20_model.json.gz`. It estimates the archived same-month 20-signal values from month-end text. The website worker prefers captured text from the latest closed UTC month; when that month has no text, it can produce an explicitly tagged month-to-date estimate targeted at the current month end. It is a shadow nowcast, not an observed signal or a purchase forecast. The ten matched months, two test months, and live-vs-training text mismatch are too weak to promote it. All generated records remain unusable for current values and purchasing.
+The current website's 1,018 selected drug projections are a separate CMS
+claims-persistence path. They do not consume the 20 archived news columns or
+the synthetic XGBoost signal recipe. No current application path feeds the
+live article-text shadow estimates into a per-drug XGBoost forecast; the
+synthetic comparison uses the frozen 1,312-column signal file. The article
+backend remains a shadow estimate with ten matched months, not a validated
+replacement for the missing original signal generator. The legacy
+`model/prod_pipeline.py` intentionally fails closed for forecast output.
 
 The source-native FluView observations can be summarized as a complete, point-in-time annual candidate with `python -m arkansas_pharma_signal.fluview_point_in_time --database website/data/signals.sqlite3 --year 2025 --as-of 2026-10-09T23:00:00Z` when the model package is on `PYTHONPATH`. The bridge reads only captured Arkansas ILI, U.S. ILI, and U.S. weighted ILI rows, selects the latest revision published and recorded by the cutoff, and withholds all three means unless every Saturday in the requested year is present. Its output explicitly says `model_compatible: false`: the saved model used a different issue-year feature alignment and an unpublished Arkansas weighted-ILI column. This bridge is a building block for corrected retraining, not a forecast runner.
-
-### Current measured results
-
-The 90-configuration grid selected `top5_all_lag1__shallow_poisson` using validation WAPE. After applying the 14-day boundary purge, it scored **32.87% pooled WAPE** on the final 6,180 forecast origins beginning 2025-05-26, versus **29.85%** for the matched sales-only Poisson XGBoost model. That is a 10.14% relative WAPE regression with the selected signals.
-
-The fixed historical recipe, rerun with the 14-day target purge, scored **29.27% pooled WAPE** versus **31.96%** for its matched sales-only model, an 8.43% relative WAPE reduction. It improved WAPE for **18 of 30 drugs** and averaged 28.28% per-drug WAPE versus 31.25% sales-only. This closely reproduces the repository's earlier **29.40% vs. 32.35%** result without the boundary overlap. It is the default local demand forecast recipe; the comparison uses the same synthetic holdout and is not evidence of accuracy on observed pharmacy sales. The 90-grid validation winner scores worse than its matched baseline, and remains available for comparison. The 20-output temporal replacement averaged **6.3771 MAE** across its final 20 monthly rows versus **8.9300** for persistence, but it forecasts archived output values from their own lags and calendar, not from article text. A separate TF-IDF/Ridge experiment scored **11.91% pooled WAPE** versus **87.07%** for persistence on its final two matched months; this result is highly unstable at that sample size and does not justify promoting the article model. See [`comparison.md`](comparison.md) for all variants, individual drug results, and exact limitations.
 
 ## What the system does
 
@@ -103,7 +164,7 @@ Arkansas is the primary local evaluation setting. National, neighboring-state, a
 | Path | What it contains |
 |---|---|
 | `arkansas_pharma_signal/` | Main Python package. Source adapters, feature and panel builders, target-specific evaluators, models, output validators, and the command-line interface live here. |
-| `rebuilt_demand/` | Runnable 20-output temporal replacement, exploratory article-text experiment, 90-configuration synthetic-demand training/evaluation pipeline, and fixed historical-recipe inference model described above. |
+| Historical `rebuilt_demand/` | Removed in commit `77c9427`; retained 90-grid scores and protocol are summarized in `comparison.md`, but the old trainer and serialized model files are absent. |
 | `tests/` | Unit and contract tests for schemas, chronology, joins, model behavior, target evaluation, output validation, and CLI-related behavior. |
 | `docs/` | Design and research documentation: architecture, data sources, implementation and target contracts, testing protocol, availability limitations, status, and review history. |
 | `docs/REBUILD_PROGRESS.md` | Dated progress log for the local 20-output and 1,312-signal rebuild, including verified metrics and unresolved data gaps. |
@@ -143,7 +204,7 @@ The package is deliberately split by data boundary and responsibility. Modules a
 | `input_sources.py`, `live_inputs.py` | Source definitions and explicitly refreshable public inputs, including selected CMS, FDA, and weather feeds. |
 | `news_corpus.py`, `event_extraction.py`, `event_schema.py` | Load available article text and metadata, extract typed events, and retain date/evidence boundaries. |
 | `news_signals.py`, `news_relevance.py`, `text_signals.py`, `expert_news_heads.py`, `learned_event_state.py` | News relevance, disease/event signal construction, text features, and associated experimental/evaluation paths. |
-| `news_only_adapter.py` | Validated bridge for the archived FLAN-T5-small news-only monthly signal table. It has a strict schema boundary and prefixes bridged features with `news_only_`. A separate TF-IDF/Ridge article model is trained and exported under `rebuilt_demand/`; the API runs it only as an unvalidated shadow estimate. |
+| `news_only_adapter.py` | Validated bridge for the archived 20-column news-only monthly output table. It has a strict schema boundary and prefixes bridged features with `news_only_`. The original FLAN-T5 inference runner is unavailable; the separate website TF-IDF/Ridge article estimate is shadow-only and unvalidated. |
 | `weekly_health_proxy.py`, `nssp_respiratory.py`, `respnet.py`, `hospital_respiratory.py`, `wastewater_pressure.py`, `regional_wastewater.py`, `overdose_pressure.py` | Disease, respiratory, wastewater, hospital-utilization, and overdose context adapters/evaluators. These are health-pressure proxies, not medication inventory labels. |
 | `historical_weather.py` | Historical weather loading and aggregation with observed coverage retained. |
 | `shortage_pressure.py`, `supplier_shortage.py`, `recall_pressure.py`, `arkansas_exposure.py` | FDA shortage, supplier-event, recall, and Arkansas exposure signals and evaluation. |

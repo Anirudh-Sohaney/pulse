@@ -1,5 +1,6 @@
 import pytest
 import jwt
+from datetime import datetime, timezone
 from fastapi.testclient import TestClient
 
 from backend.app import create_app
@@ -133,6 +134,72 @@ def test_browser_auth_rejects_cross_origin_requests(tmp_path, monkeypatch):
                        headers={"Origin": "https://attacker.example"}).status_code == 403
 
 
+def test_api_keys_are_one_time_visible_revocable_and_authorize_signal_history(tmp_path, monkeypatch):
+    from backend import signal_store
+
+    monkeypatch.setattr(settings, "DATA_PATH", str(tmp_path))
+    client = TestClient(create_app())
+    signal_store.initialize()
+    observed_at = datetime.now(timezone.utc).isoformat()
+    with signal_store.connect() as db:
+        signal_id = signal_store.ensure_source_definition(
+            db, signal_id="api_key_test_signal", cadence="daily",
+            geography_level="state", geography_id="AR", unit="index",
+            source_name="Test source", source_url="https://example.test/source")
+        db.execute("""INSERT INTO signal_records
+            (row_hash, signal_uid, signal_date, observation_date, value,
+             source_timestamp, ingested_at, data_quality, missingness,
+             forecast_horizon, source_kind, source_url)
+            VALUES ('api_key_test_row', ?, '2026-10-10', '2026-10-10', 7.5,
+                    ?, ?, 'observed', '', '', 'test_source',
+                    'https://example.test/source')""", (signal_id, observed_at, observed_at))
+    account = {"username": "api_key_owner", "password": "a-long-unique-password-123"}
+    assert client.post("/api/auth/register", json=account).status_code == 201
+    csrf = client.cookies.get("pulse_csrf")
+    created = client.post("/api/auth/api-keys", json={"name": "nightly job"},
+                          headers={"X-CSRF-Token": csrf})
+    assert created.status_code == 201
+    body = created.json()
+    assert body["key"].startswith("pulse_live_")
+    assert body["scope"] == "signals:read"
+    key = body["key"]
+    listed = client.get("/api/auth/api-keys").json()["keys"]
+    assert listed[0]["key_prefix"] == body["key_prefix"]
+    assert "key" not in listed[0]
+    headers = {"X-API-Key": key}
+    history = client.post("/api/v1/signals/history", headers=headers,
+                          json={"ids": [signal_id], "date": "2026-10-10"})
+    assert history.status_code == 200
+    assert history.json()["values"][0]["value"] == 7.5
+    today = client.get("/api/v1/signals/today?limit=1500&offset=0", headers=headers)
+    assert today.status_code == 200
+    assert today.json()["snapshot_date"]
+    assert next(row for row in today.json()["values"] if row["id"] == signal_id)["value"] == 7.5
+    study = client.get("/api/v1/signals/demand/horizon-study", headers=headers)
+    assert study.status_code == 200
+    assert study.json()["drug_count"] == 30
+    assert client.delete(f"/api/auth/api-keys/{body['id']}",
+                         headers={"X-CSRF-Token": csrf}).status_code == 200
+    assert client.get("/api/v1/signals/today", headers=headers).status_code == 401
+
+
+def test_api_key_daily_limit_applies_to_keyed_signal_requests(tmp_path, monkeypatch):
+    from backend.routes import auth
+
+    monkeypatch.setattr(settings, "DATA_PATH", str(tmp_path))
+    monkeypatch.setattr(auth, "API_KEY_DAILY_LIMIT", 1)
+    client = TestClient(create_app())
+    assert client.post("/api/auth/register", json={
+        "username": "api_key_quota", "password": "a-long-unique-password-123",
+    }).status_code == 201
+    created = client.post("/api/auth/api-keys", json={"name": "quota test"},
+                          headers={"X-CSRF-Token": client.cookies.get("pulse_csrf")})
+    key = created.json()["key"]
+    headers = {"X-API-Key": key}
+    assert client.get("/api/v1/signals/freshness", headers=headers).status_code == 200
+    limited = client.get("/api/v1/signals/freshness", headers=headers)
+    assert limited.status_code == 429
+    assert limited.headers["retry-after"] == "86400"
 def test_hosted_same_origin_auth_uses_public_origin_behind_http_proxy(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "DATA_PATH", str(tmp_path))
     monkeypatch.setattr(settings, "ENVIRONMENT", "production")

@@ -21,6 +21,13 @@ MODEL_PATH = Path(__file__).resolve().parents[1] / "catalog" / "news_text_20_mod
 MODEL_ARTIFACT_SHA256 = "f2b975b770180485f5af23ba0fde4e68deb3094e1b8fd4ef44f9e9daf467257c"
 MODEL_SCHEMA = "pulse_news_text_ridge_v1"
 TOKEN_PATTERN = re.compile(r"(?u)\b\w\w+\b")
+# These archived columns are exact aliases across all 97 recorded months.
+# Keep the historical 20-ID contract, but never let an artifact assign the
+# aliases different coefficients or predictions.
+ALIASED_SIGNALS = (
+    ("national_policy_risk", "national_policy_direction"),
+    ("national_supply_chain_risk", "national_supply_stage_direction"),
+)
 
 
 @lru_cache(maxsize=1)
@@ -51,6 +58,11 @@ def load_model(path: str = str(MODEL_PATH)) -> dict:
             "token_pattern": r"(?u)\b\w\w+\b", "ngram_range": [1, 2],
             "sublinear_tf": True, "norm": "l2"}:
         raise ValueError("20-signal model vectorizer configuration is unsupported")
+    for left, right in ALIASED_SIGNALS:
+        left_index, right_index = signal_ids.index(left), signal_ids.index(right)
+        if (not np.array_equal(coefficients[left_index], coefficients[right_index])
+                or intercept[left_index] != intercept[right_index]):
+            raise ValueError(f"Archived signal aliases disagree: {left}, {right}")
     return {**artifact, "idf_array": idf, "coefficient_array": coefficients,
             "intercept_array": intercept,
             "stopword_set": set(artifact.get("stop_words", []))}
@@ -83,5 +95,9 @@ def predict(text: str, artifact: dict | None = None) -> dict[str, float]:
     values = model["coefficient_array"] @ _features(str(text), model) + model["intercept_array"]
     if not np.isfinite(values).all():
         raise ValueError("20-signal model emitted a non-finite output")
-    return {name: float(max(0.0, value))
-            for name, value in zip(model["signal_ids"], values, strict=True)}
+    result = {name: float(max(0.0, value))
+              for name, value in zip(model["signal_ids"], values, strict=True)}
+    for left, right in ALIASED_SIGNALS:
+        if not math.isclose(result[left], result[right], rel_tol=0, abs_tol=1e-10):
+            raise ValueError(f"Archived signal aliases produced different outputs: {left}, {right}")
+    return result
