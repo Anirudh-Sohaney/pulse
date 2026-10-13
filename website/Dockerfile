@@ -9,7 +9,7 @@ RUN pip install --no-cache-dir --only-binary=:all: -r requirements-prod.lock
 # Copy application code
 COPY . .
 RUN groupadd --gid 10001 pulse && useradd --uid 10001 --gid pulse --no-create-home --shell /usr/sbin/nologin pulse \
-    && mkdir -p /app/data && chown pulse:pulse /app/data
+    && mkdir -p /app/data && chown -R pulse:pulse /app
 USER pulse
 
 # Expose port
