@@ -19,7 +19,7 @@ services:
     security_opt: [no-new-privileges:true]
     tmpfs:
       - /tmp:rw,noexec,nosuid,nodev
-    command: ["sh", "-c", "python -m scripts.import_signal_catalog && python -m scripts.materialize_source_signals && python -m scripts.audit_signal_store && python -m backend.main"]
+    command: ["sh", "-c", "python -m scripts.import_signal_catalog && python -m scripts.audit_signal_store && python -m backend.main"]
     ports:
       - "127.0.0.1:8000:8000"
     environment:
