@@ -30,7 +30,9 @@ secret-copy error was purged and the signing and backup keys were rotated.
 The backup worker verifies daily SQLite/CMS snapshots and exports an
 AES-256-GCM encrypted bundle to a separate Oracle block volume. A restore
 rehearsal of the 2026-10-13 snapshot passed, including catalog and account API
-checks. That volume is on the same Oracle host, so disaster recovery after
+checks. The encrypted export also passed a decrypt-and-restore rehearsal with
+1,480 catalog signals and 1,018 ranked drugs. That volume is on the same
+Oracle host, so disaster recovery after
 loss of the entire host still needs an independently stored encrypted copy and
 separate custody of the backup key. A controlled reboot on 2026-10-13
 confirmed that the block volume, host Nginx, firewall, timers, and all four
