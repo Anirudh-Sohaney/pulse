@@ -76,6 +76,9 @@ The encrypted export is authenticated by the backup health check. To survive
 loss of the entire Oracle host, provision independent storage for encrypted
 bundles and retain the backup key separately, then rehearse recovery from that
 copy. This independent copy is not yet configured.
+On 2026-10-13, an encrypted bundle was decrypted into a temporary directory
+and passed the full restore rehearsal with 1,480 catalog signals and 1,018
+ranked drugs.
 
 Production secrets are in ignored files under `website/secrets/`; the ignored
 `website/.env` has the domain and backup mount configuration. Keep both out of
