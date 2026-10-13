@@ -1,8 +1,39 @@
 # PULSE service and data readiness
 
-This document records the current implementation and its remaining gates. It is
-not a claim that every catalog value is current or that the platform is ready
-for a public launch.
+This document records the implementation, dated audits, and remaining gates.
+For the live Oracle installation and recovery commands, see
+[`deploy/oracle/README.md`](deploy/oracle/README.md). Historical sections below
+describe earlier local states and are not the current server status.
+
+## Oracle live deployment (2026-10-13)
+
+`pulseintelligence.tech` and `www.pulseintelligence.tech` resolve to the Oracle
+host. Host Nginx serves HTTPS on 443, redirects HTTP and `www` to the apex,
+applies request and connection limits, and proxies the frontend and API through
+loopback-only container ports. Certbot's renewal dry run passed for both names.
+The host firewall keeps web ports and SSH open; Docker, the firewall unit,
+Certbot timer, and the five-minute GitHub update timer are enabled.
+
+The server follows `codex/production-readiness` at the same Git commit as the
+local checkout and GitHub branch. `pulse-update.service` accepts only a clean,
+fast-forward checkout, builds the Compose images, waits for the API and frontend,
+and records the deployed commit in `/var/lib/pulse/deployed-commit`. Backend,
+frontend, worker, and backup containers run with restart policies. The worker
+refreshes at 16:00 UTC and the backup worker snapshots at 04:00 UTC, with
+catch-up checks after downtime. The current live worker source audit reports
+no failed or stale required sources. The article text model runs as an
+unvalidated shadow estimate and remains excluded from usable latest values.
+
+Production signing and backup keys are stored as ignored, owner-restricted
+files outside Docker image build contexts; image build cache from an earlier
+secret-copy error was purged and the signing and backup keys were rotated.
+The backup worker verifies daily SQLite/CMS snapshots and exports an
+AES-256-GCM encrypted bundle to a separate Oracle block volume. A restore
+rehearsal of the 2026-10-13 snapshot passed, including catalog and account API
+checks. That volume is on the same Oracle host, so disaster recovery after
+loss of the entire host still needs an independently stored encrypted copy and
+separate custody of the backup key. A full host reboot recovery check remains
+to be performed.
 
 ## Current local signal audit (2026-10-10)
 
@@ -257,8 +288,8 @@ worker cannot modify the same snapshot directory concurrently.
 Backup directories are mode `0700`; database files are `0600`. To inspect a
 snapshot, run `python -m scripts.backup_databases --verify PATH_TO_SNAPSHOT`.
 Run `python -m scripts.rehearse_restore PATH_TO_SNAPSHOT` to boot the API
-against a temporary restored copy and check the 1,312-ID catalog, at least
-4,097 bundled historical catalog records in the backup itself, signal date and
+against a temporary restored copy and check the 1,250-ID seed catalog, at least
+1,950 bundled historical catalog records in the backup itself, signal date and
 provenance audit, drug ranking, and CMS source pair without changing the live
 databases. It also checks the restored account table and exercises registration,
 login, authenticated access, and session revocation using a disposable account

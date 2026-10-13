@@ -17,6 +17,7 @@ from backend.app import create_app
 from backend.config import settings
 from backend.refresh_cms_partd_source import source_snapshot
 from backend.signal_store import backfill_catalog_source_urls, catalog_rows
+from backend.signal_store import SEED_DEFINITION_COUNT, SEED_HISTORICAL_RECORD_COUNT
 from scripts.backup_databases import verify_backup
 from scripts.audit_signal_store import audit as audit_signal_store
 from scripts.import_signal_catalog import DEFAULT_HISTORY, DEFAULT_HISTORY_SHA256
@@ -52,8 +53,8 @@ def repair_historical_source_urls(database: Path) -> int:
         return backfill_catalog_source_urls(db, observations)
 
 
-def rehearse(snapshot: Path, *, expected_catalog: int = 1312,
-             expected_historical_records: int = 4097) -> dict:
+def rehearse(snapshot: Path, *, expected_catalog: int = SEED_DEFINITION_COUNT,
+             expected_historical_records: int = SEED_HISTORICAL_RECORD_COUNT) -> dict:
     manifest = verify_backup(snapshot)
     if "cms_partd_source_manifest.json" not in manifest["files"]:
         raise ValueError("Snapshot does not include the CMS source pair")
@@ -113,8 +114,9 @@ def rehearse(snapshot: Path, *, expected_catalog: int = 1312,
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("snapshot", type=Path)
-    parser.add_argument("--expected-catalog", type=int, default=1312)
-    parser.add_argument("--expected-historical-records", type=int, default=4097)
+    parser.add_argument("--expected-catalog", type=int, default=SEED_DEFINITION_COUNT)
+    parser.add_argument("--expected-historical-records", type=int,
+                        default=SEED_HISTORICAL_RECORD_COUNT)
     args = parser.parse_args()
     print(json.dumps(rehearse(args.snapshot, expected_catalog=args.expected_catalog,
                              expected_historical_records=args.expected_historical_records),
