@@ -39,7 +39,7 @@ cd "$repo/website"
 python3 -m scripts.cloud_preflight
 compose=(docker compose -f docker-compose.yml -f docker-compose.cloud.yml -f docker-compose.oracle.yml)
 "${compose[@]}" config --quiet
-"${compose[@]}" build backend worker backup frontend
+"${compose[@]}" build data-permissions backend worker backup frontend
 "${compose[@]}" up -d --no-build --remove-orphans
 
 for attempt in $(seq 1 60); do

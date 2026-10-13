@@ -1,0 +1,12 @@
+[Unit]
+Description=Allow public HTTP and HTTPS for PULSE
+After=network-pre.target
+Before=nginx.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/bash /opt/pulse/website/deploy/oracle/allow_web_ports.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
