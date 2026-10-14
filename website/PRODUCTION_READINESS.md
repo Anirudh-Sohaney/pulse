@@ -51,13 +51,12 @@ On 2026-10-14, the live Chromium smoke completed browser-side training from
 dated sales and inventory history, encrypted plan reload, idle locking,
 session revocation, and the private-file upload boundary. The public Pyodide
 module was served as JavaScript. The broader local research suite subsequently
-passed 368 tests and failed 12 in 499.56 seconds after hydrating the FDA NDC
-LFS file and reconciling two stale test fixtures. The quarterly Medicaid panel
-was then generated locally with `forecast-quarterly --max-rows 100`; all 16
-training tests passed. A missing HHS evaluation artifact reference was
-replaced with a deterministic publication-gate test. The remaining research
-failures involve missing or stale local evaluation artifacts and their
-qualification expectations, so those models are not ready for publication.
+passed 373 tests and failed 7 in 700.24 seconds after hydrating the FDA NDC
+LFS file, generating the quarterly Medicaid panel with `forecast-quarterly
+--max-rows 100`, and replacing two stale artifact-dependent tests with
+deterministic checks. All seven failures are metric-audit assertions that
+expect old promotion results from missing or stale local evaluation artifacts;
+those models are not ready for publication.
 The current local metric-library audit qualifies one proxy candidate from
 available artifacts and fails all three Part One coverage gates. The
 leaderboard residual-model test now evaluates a deterministic panel directly
@@ -73,9 +72,10 @@ restores the last deployed checkout and image tags, quarantines the failed
 commit, and accepts a subsequent fixed commit. The live successful update to
 `385b8da` passed with all four application containers healthy.
 The public `/api/v1/system/version` route reports the Git revision used to
-start the API container. Documentation-only and research-test-only updates
-retain the running image, so that runtime revision can precede the GitHub
-branch head without indicating a failed deploy.
+start the API container; it reported `94066b0` after the 2026-10-14 update.
+Documentation-only and research-test-only updates retain the running image,
+so that runtime revision can precede the GitHub branch head without
+indicating a failed deploy.
 
 ## Current local signal audit (2026-10-10)
 
