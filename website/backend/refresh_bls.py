@@ -40,8 +40,7 @@ def fetch_series(series_id: str, *, timeout: int = 90,
         raise ValueError("Unexpected FRED series ID")
     url = ("https://fred.stlouisfed.org/graph/fredgraph.csv?"
            + urlencode({"id": series_id, "cosd": f"{start_year}-01-01"}))
-    request = Request(url, headers={"User-Agent": "PULSE-public-signal-monitor/1.0",
-                                    "Accept": "text/csv"})
+    request = Request(url, headers={"Accept": "text/csv"})
     with urlopen(request, timeout=timeout) as response:
         document = response.read().decode("utf-8-sig")
     reader = csv.DictReader(io.StringIO(document))
@@ -135,7 +134,7 @@ def derive_months(base_name: str, months: list[tuple[str, float, str]]) -> dict[
     return result
 
 
-def refresh_bls() -> dict:
+def refresh_bls(*, force: bool = False) -> dict:
     initialize()
     now = datetime.now(timezone.utc)
     # Space explicit --once runs as well as scheduled refreshes. FRED's CSV
@@ -144,7 +143,7 @@ def refresh_bls() -> dict:
         latest_attempt = db.execute("""SELECT COALESCE(finished_at, started_at) AS attempted_at,
             status FROM refresh_runs WHERE source_name=? ORDER BY id DESC LIMIT 1""",
             (SOURCE_KIND,)).fetchone()
-    if latest_attempt:
+    if latest_attempt and not force:
         try:
             attempted_at = datetime.fromisoformat(latest_attempt["attempted_at"])
             if attempted_at.tzinfo is None:

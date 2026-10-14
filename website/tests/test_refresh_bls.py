@@ -20,6 +20,7 @@ def test_fred_csv_refresh_records_month_end_and_provenance(tmp_path, monkeypatch
     def fake_open(request, timeout):
         series = next(name for name in csv_by_series if f"id={name}" in request.full_url)
         assert "cosd=2000-01-01" in request.full_url
+        assert "User-agent" not in request.headers
         return io.BytesIO(csv_by_series[series].encode())
 
     monkeypatch.setattr(refresh_bls, "urlopen", fake_open)

@@ -95,6 +95,9 @@ after success and retries failed network reads after six hours. Failures are ret
 in per-source diagnostics but excluded from general signal warnings; failed
 fetches write no partial BLS update and do not affect other source families or
 the drug ranking.
+The Oracle worker's first FRED fetch timed out because FRED stalled responses
+to the adapter's custom User-Agent; a direct request with Python's default
+client succeeded from the same container. The adapter no longer sets that header.
 
 This section supersedes earlier operational counts in the dated log below.
 Those entries preserve the history of the previous 1,312-ID manifest and
