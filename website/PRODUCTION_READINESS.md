@@ -49,13 +49,15 @@ tracked-content scan found no common private-key or API-token formats.
 
 On 2026-10-14, the live Chromium smoke completed browser-side training from
 dated sales and inventory history, encrypted plan reload, idle locking,
-session revocation, and the private-file upload boundary. The deployed
-revision was `ace166a`; the public Pyodide module was served as JavaScript.
-The broader local research suite passed 365 tests and failed 15 before
-hydrating the FDA NDC LFS file. Its previously failing Medicaid feature-layer
-test passed after hydration. Missing generated research evaluation/panel
-artifacts and stale research assertions remain; those models are not ready for
-publication.
+session revocation, and the private-file upload boundary. The public Pyodide
+module was served as JavaScript. The broader local research suite subsequently
+passed 368 tests and failed 12 in 499.56 seconds after hydrating the FDA NDC
+LFS file and reconciling two stale test fixtures. The quarterly Medicaid panel
+was then generated locally with `forecast-quarterly --max-rows 100`; all 16
+training tests passed. A missing HHS evaluation artifact reference was
+replaced with a deterministic publication-gate test. The remaining research
+failures involve missing or stale local evaluation artifacts and their
+qualification expectations, so those models are not ready for publication.
 The 2026-10-13 encrypted backup bundle and its key were copied outside the
 repository to the local WSL machine with owner-only permissions. Hashes matched
 the Oracle files, and the local copy decrypted and passed a full restore

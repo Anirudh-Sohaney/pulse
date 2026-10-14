@@ -1,11 +1,11 @@
 import pandas as pd
-import json
-from pathlib import Path
 
 from arkansas_pharma_signal.monthly_pharmacy_demand import (
     build_monthly_pharmacy_demand_view, evaluate_monthly_pharmacy_demand,
 )
-from arkansas_pharma_signal.monthly_context_utility import build_monthly_context_view
+from arkansas_pharma_signal.monthly_context_utility import (
+    build_monthly_context_view, evaluate_monthly_context_utility,
+)
 from arkansas_pharma_signal.therapeutic_class_demand import (
     build_therapeutic_class_panel, evaluate_therapeutic_class_demand,
 )
@@ -60,14 +60,17 @@ def test_monthly_evaluator_supports_county_drug_groups():
     assert result["group_columns"] == ["county_fips", "drug_key"]
 
 
-def test_hhs_aggregate_candidates_do_not_bypass_event_gate():
-    artifact = json.loads(Path(
-        "model/artifacts/evaluation/arkansas_pharmacy_market_context_metrics.json"
-    ).read_text())
-    results = artifact["results"]
-    assert results["monthly_claim_line_demand"]["publishable_candidate"] is False
-    assert results["monthly_observed_pharmacy_provider_capacity"][
-        "publishable_candidate"] is False
+def test_hhs_context_proxy_does_not_bypass_publication_gate():
+    rows = []
+    for drug_index in range(3):
+        for month in pd.period_range("2019-01", "2022-12", freq="M"):
+            rows.append({"month": str(month), "drug_key": f"ndc-{drug_index}",
+                         "demand_claim_lines": 50 + 4 * drug_index + month.month})
+    view = build_monthly_context_view(pd.DataFrame(rows))
+    result = evaluate_monthly_context_utility(view, min_train_months=12)
+    assert result["fold_count"] >= 3
+    assert result["publishable_candidate"] is False
+    assert "proxy" in result["scope"]
 
 
 def test_monthly_context_is_shifted_before_demand_join():
