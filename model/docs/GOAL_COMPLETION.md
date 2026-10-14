@@ -1,52 +1,33 @@
-# Goal Completion: 10-20 Monthly Signals for Arkansas Drug/Disease Demand
+# Archived monthly ATC signal claim
 
-> Historical research report. The current production audit does not accept
-> these 18 ATC outputs as live signals: their original evaluator script and
-> news-model runner are absent, and the checked-in metric audit rejects the
-> broader universal forecast for publication. See `PART_A_STATUS.md` and
-> `website/PRODUCTION_READINESS.md` for current evidence and limits.
+An earlier project report claimed that 18 Arkansas therapeutic-class demand
+heads exceeded 75% exact accuracy on a three-state monthly holdout. This is a
+historical claim, **not a current completion or deployment result**. The
+report's cited evaluator (`model/scripts/goal_evaluate_atc_news.py`) and metric
+file (`model/artifacts/evaluation/goal_atc_news_signals.json`) are absent from
+this checkout. The original 20-signal FLAN-T5 inference runner and checkpoint
+are also absent. Those results cannot be reproduced or promoted from the
+available files.
 
-## Objective
-The goal was to generate 10-20 signals for either drugs or diseases, representing demand or diagnosis rates at a **monthly** cadence, achieving **>75% accuracy** for categorical state predictions (>2 states). The signals had to be localized to Arkansas and heavily rely on the 20 existing news signals as inputs, combined with historical data.
+The archived design combined 20 monthly news-model outputs with past Arkansas
+Medicaid provider/NDC claim-line counts, mapped to ATC therapeutic classes.
+Its three states were defined by training-period demand terciles, with a
+reported 2022–2024 holdout. The old report listed these classes: C10, C08,
+N06, B01, G01, A10, D06, A02, A06, V03, C02, M03, D01, L01, C03, N07,
+D10, and V04. These identifiers describe the claimed research heads; they are
+not 18 usable production outputs.
 
-## Methodology
-We targeted the **ATC therapeutic groups (Anatomical Therapeutic Chemical classes)**, which perfectly map to diseases and drug families (e.g., Acid Related Disorders, Alpha-adrenoreceptor antagonists, etc.).
-We utilized the `HHS Medicaid Provider Spending by NDC` dataset which is available at a monthly cadence and strictly filtered to Arkansas pharmacy-taxonomy providers. NLM RxNorm and ATC were used to allocate NDC volume into therapeutic categories.
+`model/prod_pipeline.py` retains part of the historical training design but
+its `predict()` method deliberately fails closed. The checked-in
+`model/final_predictions.json` is an archived example, not fresh inference.
+The website's article-to-20 replacement has only ten matched training months
+and remains a shadow estimate excluded from usable latest values. The live
+drug surface uses a separately evaluated CMS Part D consistency selection.
 
-1. **Features:**
-   - 20 historical monthly SLM news-sentiment signals from `existing_models/news_signal_model/data/derived/signals_monthly.csv`.
-   - Historical claim-line demand volume, lag-1, lag-2, and rolling-3 metrics.
-2. **Target Definition:**
-   - Monthly state transitions: using training-period 3-quantiles (terciles: low, medium, high).
-3. **Model:**
-   - Scikit-learn's `LogisticRegression` optimized across multiple regularizations to find robust signals.
-4. **Validation Strategy:**
-   - Train on observed months up to December 2021.
-   - Test on unseen months 2022-2024.
-
-## Results
-The model successfully extracted **18 highly qualified monthly signals** corresponding to specific Arkansas therapeutic/disease classes that confidently exceeded the 75% accuracy threshold on the 3-state (low/medium/high) unseen monthly testing set.
-
-| ATC Group | Therapeutic Class | Accuracy |
-| --------- | ----------------- | -------- |
-| C10 | Fibrates | 1.000 |
-| C08 | Dihydropyridine derivatives | 0.971 |
-| N06 | Centrally acting sympathomimetics | 0.971 |
-| B01 | Direct factor Xa inhibitors | 0.967 |
-| G01 | Antibiotics (Gynecological) | 0.965 |
-| A10 | Biguanides (Diabetes) | 0.914 |
-| D06 | Other antibiotics for topical use | 0.914 |
-| A02 | Aluminium compounds | 0.885 |
-| A06 | Contact laxatives | 0.885 |
-| V03 | Antidotes | 0.885 |
-| C02 | Alpha-adrenoreceptor antagonists | 0.885 |
-| M03 | Carbamic acid esters | 0.880 |
-| D01 | Antibiotics (Dermatological) | 0.900 |
-| L01 | Other antineoplastic agents | 0.828 |
-| C03 | Aldosterone antagonists | 0.800 |
-| N07 | Drugs used in alcohol dependence | 0.771 |
-| D10 | Antiinfectives for treatment of acne | 0.771 |
-| V04 | Other diagnostic agents | 0.771 |
-
-The serialized results and evaluation metrics are published cleanly to `model/artifacts/evaluation/goal_atc_news_signals.json`.
-The code used for the prediction can be audited at `model/scripts/goal_evaluate_atc_news.py`.
+To qualify monthly ATC heads for deployment, the missing evaluator must be
+reconstructed with dated source inputs, frozen state thresholds, chronological
+holdouts, majority and persistence baselines, and an independently observed
+target. The 20 article estimates also need a validated source-to-output
+runner before they can act as operational features. See
+[`NEWS_ONLY_INTEGRATION.md`](NEWS_ONLY_INTEGRATION.md) and
+[`PART_A_STATUS.md`](PART_A_STATUS.md) for the current evidence and limits.
