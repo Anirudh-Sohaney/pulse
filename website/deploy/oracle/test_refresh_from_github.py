@@ -59,7 +59,13 @@ def test_failed_container_start_restores_checkout_and_quarantines_commit():
             "  touch \"$MOCK_FIRST_UP\"\n"
             "  exit 1\n"
             "fi\n")
-        for name in ("curl", "python3", "sleep"):
+        (fake_bin / "curl").write_text(
+            "#!/bin/sh\n"
+            "case \"$*\" in\n"
+            "  */api/v1/system/version*) "
+            "printf '{\"runtime_revision\":\"%s\"}\\n' \"$PULSE_REVISION\" ;;\n"
+            "esac\n")
+        for name in ("python3", "sleep"):
             (fake_bin / name).write_text("#!/bin/sh\nexit 0\n")
         for executable in fake_bin.iterdir():
             executable.chmod(0o755)

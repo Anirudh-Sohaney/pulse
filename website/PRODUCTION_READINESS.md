@@ -68,6 +68,10 @@ revision. Its isolated rollback test verified that a failed container start
 restores the last deployed checkout and image tags, quarantines the failed
 commit, and accepts a subsequent fixed commit. The live successful update to
 `385b8da` passed with all four application containers healthy.
+The public `/api/v1/system/version` route reports the Git revision used to
+start the API container. Documentation-only and research-test-only updates
+retain the running image, so that runtime revision can precede the GitHub
+branch head without indicating a failed deploy.
 
 ## Current local signal audit (2026-10-10)
 

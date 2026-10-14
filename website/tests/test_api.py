@@ -20,6 +20,13 @@ def test_health_check(client):
     assert response.json()["status"] == "healthy"
 
 
+def test_runtime_version(client, monkeypatch):
+    monkeypatch.setenv("PULSE_REVISION", "a" * 40)
+    response = client.get("/api/v1/system/version")
+    assert response.status_code == 200
+    assert response.json() == {"runtime_revision": "a" * 40}
+
+
 def test_registration_login_and_account_status(client):
     account = {"username": "pharmacy_one", "password": "secure-password-123"}
     registered = client.post("/api/auth/register", json=account)

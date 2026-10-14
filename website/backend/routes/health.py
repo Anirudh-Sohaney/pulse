@@ -1,11 +1,19 @@
 """Health check routes."""
 
+import os
+
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
 from .. import signal_store
 
 router = APIRouter()
+
+
+@router.get("/api/v1/system/version")
+async def runtime_version():
+    """Expose the source revision used to start this API process."""
+    return {"runtime_revision": os.environ.get("PULSE_REVISION") or None}
 
 
 @router.get("/health")

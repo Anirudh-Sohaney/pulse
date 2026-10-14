@@ -21,6 +21,7 @@ git fetch --prune origin "+refs/heads/$branch:refs/remotes/origin/$branch"
 current=$(git rev-parse HEAD)
 target=$(git rev-parse "origin/$branch")
 deployed=$(cat "$state_file" 2>/dev/null || true)
+export PULSE_REVISION=$target
 if [[ $(cat "$rejected_file" 2>/dev/null || true) == "$target" ]]; then
   echo "Revision $target previously failed after container startup; waiting for a new commit or operator retry" >&2
   exit 0
@@ -49,6 +50,7 @@ rollback_on_failure() {
      git -C "$repo" cat-file -e "$deployed^{commit}" 2>/dev/null; then
     echo "Deployment failed; restoring checkout $deployed" >&2
     git -C "$repo" reset --hard "$deployed" >&2 || true
+    export PULSE_REVISION=$deployed
     if [[ "$containers_touched" == true && ${#rollback_tags[@]} -eq ${#services[@]} ]]; then
       local service index
       for index in "${!services[@]}"; do
@@ -123,7 +125,12 @@ for attempt in $(seq 1 60); do
        https://pulseintelligence.tech/api/v1/signals/coverage/summary >/dev/null &&
      curl --fail --silent --max-time 5 --resolve \
        pulseintelligence.tech:443:127.0.0.1 \
-       https://pulseintelligence.tech/browser_forecast.py >/dev/null; then
+       https://pulseintelligence.tech/browser_forecast.py >/dev/null &&
+     ( [[ "$docs_only" == true ]] ||
+       curl --fail --silent --max-time 5 --resolve \
+         pulseintelligence.tech:443:127.0.0.1 \
+         https://pulseintelligence.tech/api/v1/system/version |
+         grep -Fq "\"runtime_revision\":\"$target\"" ); then
     install -d -m 0700 "$state_dir"
     printf '%s\n' "$target" > "$state_file.tmp"
     mv "$state_file.tmp" "$state_file"
