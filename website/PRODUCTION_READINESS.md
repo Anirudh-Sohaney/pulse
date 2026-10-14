@@ -61,6 +61,11 @@ repository to the local WSL machine with owner-only permissions. Hashes matched
 the Oracle files, and the local copy decrypted and passed a full restore
 rehearsal on 2026-10-14. This protects that snapshot from Oracle host loss,
 but future bundles still need an automatic independent destination.
+The Oracle updater now checks worker and backup health before recording a
+revision. Its isolated rollback test verified that a failed container start
+restores the last deployed checkout and image tags, quarantines the failed
+commit, and accepts a subsequent fixed commit. The live successful update to
+`385b8da` passed with all four application containers healthy.
 
 ## Current local signal audit (2026-10-10)
 
