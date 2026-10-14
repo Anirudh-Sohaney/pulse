@@ -196,7 +196,7 @@ function OperationsTopic() {
           <Endpoint path="/api/v1/signals/coverage">Inspect coverage across signal definitions and observed values.</Endpoint>
           <Endpoint path="/api/v1/signals/coverage/summary">Get a compact coverage summary for dashboards and operational checks.</Endpoint>
         </div>
-        <p className="text-sm leading-7 text-[#5b6a64]">A current target year can still rely on older source data. Check source periods and timestamps in the result. An adapter failure does not invalidate values from other sources. Optional monthly BLS data is separate from core signal consistency.</p>
+        <p className="text-sm leading-7 text-[#5b6a64]">A current target year can still rely on older source data. Check source periods and timestamps in the result. Labor and price context uses monthly BLS series mirrored by FRED; a failed context refresh leaves recorded values intact and does not change the drug projections.</p>
       </Section>
       <Section eyebrow="Traffic" title="Use limits deliberately">
         <div className="grid gap-3 sm:grid-cols-2">
