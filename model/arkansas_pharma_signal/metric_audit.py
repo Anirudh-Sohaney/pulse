@@ -875,7 +875,7 @@ def audit_metric_library(evaluation_dir: Path) -> dict[str, Any]:
         if (len(result.get("state_counts_in_scored_rows", {})) < MIN_STATE_COUNT
                 or not all(result.get("state_counts_in_scored_rows", {}).values())):
             reasons.append(f"fewer than {MIN_STATE_COUNT} target states are observed in scored rows")
-    wastewater_candidates.append((pathogen, result, reasons))
+        wastewater_candidates.append((pathogen, result, reasons))
 
     regional_wastewater = _read(
         evaluation_dir / "regional_wastewater_five_state_metrics.json")
