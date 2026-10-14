@@ -1,5 +1,13 @@
 # Unified Medical Demand Prediction Model Report
 
+> **Archived research report.** This document records claims from the older
+> unified design. Its original article-to-20 inference runner, cited ATC
+> evaluator, and claimed 1,406-output live pipeline are not available in the
+> current checkout. The checked-in historical JSON has 1,250 outputs, and
+> `model/prod_pipeline.py` now fails closed for live prediction. The current
+> production and evaluation status is in [model/docs.md](model/docs.md) and
+> [model/docs/NEWS_ONLY_INTEGRATION.md](model/docs/NEWS_ONLY_INTEGRATION.md).
+
 ## 1. Executive Summary
 This report details the unified production-ready prediction model designed to forecast pharmaceutical and therapeutic demand at various geographical scales and cadences. The final system is an ensemble that yields 1,406 unique signals:
 * **20 News-based Systemic Signals** (Monthly)

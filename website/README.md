@@ -16,7 +16,7 @@ The FastAPI service retains a fixed 1,250-ID historical seed catalog and exposes
 values through `/api/v1/signals/catalog`, `/latest`, `/history`, `/freshness`,
 and source-specific routes. The seed manifest is an archive of identities, not
 the current publication list. The source worker checks FDA news and shortages,
-BLS, Medicaid, CMS, FluView, NNDSS, and wastewater feeds. Source adapters and
+FRED-hosted BLS series, Medicaid, CMS, FluView, NNDSS, and wastewater feeds. Source adapters and
 evaluated newer-drug outputs can add stable IDs beyond the seed catalog.
 
 `/api/v1/signals/demand/horizon-study` serves the held-out 1/7/14/30-day

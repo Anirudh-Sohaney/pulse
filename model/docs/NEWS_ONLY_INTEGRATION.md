@@ -78,6 +78,18 @@ present and should be reused for its declared targets; only the exact historical
 20-column FLAN-T5 inference path is unavailable. Do not relabel outputs from a
 different model path as those legacy signal IDs.
 
+The newer `ArkansasPharmaMultimodalModel` provides a direct article-text path:
+`NewsDocumentEncoder` produces an internal document state, which is fused with
+graph and temporal states before `ArkansasPredictionHeads` emits target
+forecasts. It does **not** contain a trained 20-name output head, and its
+`intermediate_news` vector is an embedding rather than the archived monthly
+signal table. A future version can use this direct-text architecture without
+reconstructing the old 20-column generator, provided the drug forecast head,
+point-in-time inputs, and chronological held-out performance are validated for
+the target being published. The saved annual JSON models and synthetic
+30-drug boosters are different model families; neither is evidence that the
+multimodal text path is ready for live inference.
+
 ## Reproducible historical checks
 
 From the repository root, after hydrating the HHS, FDA, and CDC evaluation

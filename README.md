@@ -1,82 +1,33 @@
 # PULSE
 
-PULSE is a predictive platform for pharmaceutical demand forecasting, generating forward-looking demand signals across CMS Part D and ATC levels.
+PULSE serves dated public-health and pharmaceutical context, selected Arkansas Medicare Part D claim-state projections, and a private pharmacy demand planner at [pulseintelligence.tech](https://pulseintelligence.tech).
 
-## Architecture
+## Current model paths
 
-1. **`website/`** — A FastAPI backend and React frontend. The backend runs a 24/7 background worker (`worker.py`) that periodically captures live news signals and runs the core `ProductionModel`. The frontend provides access to these live signals and predictions.
-2. **`model/`** — The data and research package, which houses the active `ProductionModel` implementation (`model/prod_pipeline.py`). The model combines 20 news signals with historical data to produce predictions for 1300+ CMS Part D drugs and 18 Arkansas ATC classes.
+| Path | Current role |
+| --- | --- |
+| `website/backend/` | FastAPI service and scheduled public-source refresh worker. The worker refreshes source observations, selected annual Part D claim-state projections, and an article-text shadow experiment. |
+| `website/frontend/` | Public signal pages and a private browser planner that trains from an uploaded pharmacy's own sales and inventory history. |
+| `model/arkansas_pharma_signal/` | Research models, evaluators, source adapters, and a multimodal architecture with an internal news encoder. Its named outputs are target forecasts and context states, not the historical 20 article-signal columns. |
+| `model/prod_pipeline.py` | Archived combined research design. It consumes the historical 20-column table as an input and deliberately refuses live prediction without an operational input path. |
+| `model/trained/synthetic_horizon_xgb_v1/` | Saved 1/7/14/30-day models for 30 synthetic drug series, presented as a historical study rather than live pharmacy forecasts. |
 
-Neither output should be treated as a procurement instruction or clinical decision.
+The 20 monthly article-derived columns in the older combined model were upstream features for the drug and ATC heads. The available historical Git trees contain their dated output table, but no original article-to-20 inference runner or matching weights. The current multimodal architecture can encode article text directly; it does not contain a trained head that reproduces those 20 named columns. A separate 20-column stage is unnecessary for a future direct-text design, but that design still needs a trained and chronologically validated production forecast path. See [the news integration audit](model/docs/NEWS_ONLY_INTEGRATION.md) and [model documentation](model/docs.md).
+
+The live annual Part D surface currently selects 1,018 drug claim-state projections from public annual data. Claims are a demand proxy, not pharmacy dispensing or units to purchase. The article-text 20-column experiment remains shadow-only and is excluded from usable latest values and purchasing.
 
 ## Repository layout
 
 ```text
 PULSE/
-├── data/                  # Historical and static datasets
-├── test_data/             # Test data
-├── model/                 # Contains the ProductionModel (prod_pipeline.py)
-├── website/               # FastAPI backend, background worker, and React frontend
-└── README.md              # This guide
+├── data/        # Public historical source data and provenance
+├── model/       # Research models, evaluation, and saved study artifacts
+├── test data/   # Synthetic pharmacy input examples
+└── website/     # Live API, refresh worker, frontend, and deployment scripts
 ```
 
-## Prerequisites
+## Run locally
 
-- **Python 3.10+** for the API and background worker.
-- **Node.js 20 LTS** for the React frontend.
-- **Git LFS** for downloading necessary model history files.
+Use the commands in [website/README.md](website/README.md) for the API, worker, frontend, and verification. Oracle deployment and recovery procedures are in [website/deploy/oracle/README.md](website/deploy/oracle/README.md).
 
-```bash
-git lfs install
-git lfs pull
-```
-
-## Quick Start
-
-### 1. Backend and Worker
-
-The backend serves the API and also runs a 24/7 background worker to gather live news signals and run the ProductionModel.
-
-Install Python dependencies:
-```bash
-cd website
-python -m venv .venv
-source .venv/bin/activate  # or .\.venv\Scripts\Activate.ps1 on Windows
-pip install -r requirements.txt
-```
-
-Run the API:
-```bash
-python -m backend.main
-```
-The API listens on `http://localhost:8000`.
-
-In a separate terminal, start the 24/7 background worker:
-```bash
-cd website
-source .venv/bin/activate
-python -m backend.worker
-```
-The worker will periodically trigger `refresh_combined_model.py` which trains and runs the `ProductionModel`.
-
-### 2. Frontend
-
-Install Node dependencies and start the React app:
-```bash
-cd website/frontend
-npm install
-npm run dev -- --host 127.0.0.1
-```
-The frontend is available at `http://localhost:5173`.
-
-## The Production Model
-
-The `ProductionModel` (`model/prod_pipeline.py`) is the core engine of PULSE. It works by:
-1. The background worker capturing the latest news signals via `refresh_news_model`.
-2. The worker executing `refresh_combined_model.py`.
-3. Generating predictions for 1300+ CMS Part D drugs (predicting the next year's demand state) and 18 ATC classes (predicting next month's demand state) by combining the live news signals with historical data.
-4. Persisting these predictions as live signals into the SQLite database for the frontend to consume.
-
-## License
-
-Private — All rights reserved.
+No public proxy in this repository observes local shelf inventory, wholesaler allocation, or a patient's clinical need. Do not treat these outputs as procurement or clinical instructions.

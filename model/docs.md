@@ -17,6 +17,12 @@ remains an unvalidated shadow experiment, and its outputs are not proven
 inputs to a live drug forecast. `prod_pipeline.py` fails closed for forecast
 output when its required operational inputs cannot be verified.
 
+The current multimodal research architecture encodes articles internally and
+could support a direct text-to-forecast path without reconstructing the old
+20-column intermediary. Its internal news state is not the 20 named historical
+outputs; no trained and qualified direct-text production forecast is packaged
+here. See [`docs/NEWS_ONLY_INTEGRATION.md`](docs/NEWS_ONLY_INTEGRATION.md).
+
 Project targets, source availability, and past research are documented in
 [`docs/PROJECT_GOAL.md`](docs/PROJECT_GOAL.md),
 [`docs/TARGET_AVAILABILITY.md`](docs/TARGET_AVAILABILITY.md), and
