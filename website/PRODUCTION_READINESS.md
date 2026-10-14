@@ -56,6 +56,11 @@ hydrating the FDA NDC LFS file. Its previously failing Medicaid feature-layer
 test passed after hydration. Missing generated research evaluation/panel
 artifacts and stale research assertions remain; those models are not ready for
 publication.
+The 2026-10-13 encrypted backup bundle and its key were copied outside the
+repository to the local WSL machine with owner-only permissions. Hashes matched
+the Oracle files, and the local copy decrypted and passed a full restore
+rehearsal on 2026-10-14. This protects that snapshot from Oracle host loss,
+but future bundles still need an automatic independent destination.
 
 ## Current local signal audit (2026-10-10)
 

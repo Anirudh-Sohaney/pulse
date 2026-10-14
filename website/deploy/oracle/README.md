@@ -81,7 +81,14 @@ pair, the ranking API, and account registration/login in a temporary copy.
 The encrypted export is authenticated by the backup health check. To survive
 loss of the entire Oracle host, provision independent storage for encrypted
 bundles and retain the backup key separately, then rehearse recovery from that
-copy. This independent copy is not yet configured.
+copy. A manual copy of the 2026-10-13 encrypted bundle is at
+`/root/pulse-recovery/bundles/20261013T201902.229692Z.enc` on the local WSL
+machine; its key is separately under `/root/pulse-recovery/keys/`, outside the
+repository, with owner-only permissions. Both copies matched the Oracle SHA-256
+hashes. The bundle decrypted locally and
+passed the full restore rehearsal on 2026-10-14. It is a point-in-time recovery
+copy, not an automated offsite backup schedule. An always-on independent backup
+destination is still needed for ongoing host-loss recovery.
 On 2026-10-13, an encrypted bundle was decrypted into a temporary directory
 and passed the full restore rehearsal with 1,480 catalog signals and 1,018
 ranked drugs.
