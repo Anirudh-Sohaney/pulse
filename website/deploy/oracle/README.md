@@ -68,6 +68,10 @@ failed exports hourly. Check `/api/v1/signals/freshness` for source periods and
 last attempts; a healthy worker heartbeat alone does not prove current source
 data. The public API and frontend are bound to loopback ports 8000 and 3141
 behind host Nginx; only 80, 443, and SSH are open externally.
+On 2026-10-14, the unused `rpcbind` socket and service were disabled after
+confirming that the data volume uses ext4 and the host has no NFS mounts.
+Port 111 is no longer listening; Nginx, Docker, the update timer, and the
+public API remained healthy after the change.
 
 ```bash
 curl -fsS https://pulseintelligence.tech/api/v1/signals/coverage/summary
