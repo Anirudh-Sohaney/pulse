@@ -9,5 +9,5 @@ FROM nginx:stable-alpine
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY security-headers.conf /etc/nginx/security-headers.inc
 COPY --from=build /app/dist /usr/share/nginx/html
-RUN chmod -R a+rX /usr/share/nginx/html
+RUN chmod -R a+rX /usr/share/nginx/html && nginx -t
 EXPOSE 80
