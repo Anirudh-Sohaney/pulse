@@ -59,7 +59,7 @@ def test_catch_up_retries_missing_news_source_after_fallback(tmp_path, monkeypat
         for source, status in (
             ("fda_drugs_rss", "success"),
             ("fda_medwatch_rss", "success"),
-            ("bls_public_api_v1", "success"),
+            ("fred_bls_series_csv_v1", "success"),
             ("cms_geographic_variation_api", "failed"),
         ):
             db.execute("""INSERT INTO refresh_runs
@@ -80,7 +80,7 @@ def test_catch_up_retries_missing_news_source_after_fallback(tmp_path, monkeypat
     assert len(due_after) == len(worker.REFRESH_TASKS) - 1
 
     with signal_store.connect() as db:
-        for source in ("bls_public_api_v1", "openfda_shortages", "gdelt_recent_news"):
+        for source in ("fred_bls_series_csv_v1", "openfda_shortages", "gdelt_recent_news"):
             db.execute("""INSERT INTO refresh_runs
                 (source_name, started_at, finished_at, status)
                 VALUES (?, ?, ?, 'failed')""",

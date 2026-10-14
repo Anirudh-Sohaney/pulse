@@ -46,23 +46,25 @@ def test_optional_bls_failures_never_affect_displayed_signal_coverage(tmp_path, 
     signal_store.initialize()
     now = datetime.now(timezone.utc).isoformat()
     with signal_store.connect() as db:
-        for source_name in ("bls_public_api_v1", "bls_public_api_v1_derived_v2"):
+        for source_name in ("bls_public_api_v1", "bls_public_api_v1_derived_v2",
+                            "fred_bls_series_csv_v1"):
             db.execute("""INSERT INTO refresh_runs
                 (source_name, started_at, finished_at, status, error)
                 VALUES (?, ?, ?, 'failed', 'quota exceeded')""",
                        (source_name, now, now))
     result = signal_store.freshness()
     assert {row["source_name"] for row in result["source_checks"]} == {
-        "bls_public_api_v1", "bls_public_api_v1_derived_v2"}
+        "bls_public_api_v1", "bls_public_api_v1_derived_v2",
+        "fred_bls_series_csv_v1"}
     assert result["failed_sources"] == []
 
 
 def test_weekly_bls_source_does_not_fail_daily_source_health(monkeypatch):
     monkeypatch.setattr(operational_status, "REFRESH_TASKS", [
-        (lambda: {}, ("bls_public_api_v1",)),
+        (lambda: {}, ("fred_bls_series_csv_v1",)),
     ])
     monkeypatch.setattr(operational_status, "freshness", lambda: {
-        "source_checks": [{"source_name": "bls_public_api_v1",
+        "source_checks": [{"source_name": "fred_bls_series_csv_v1",
                            "last_attempt_at": "2026-10-01T00:00:00+00:00"}],
         "failed_sources": [],
     })

@@ -22,10 +22,12 @@ UNKNOWN_SOURCE_TIME_KINDS = {"historical_catalog", "historical_news_bridge"}
 WEEKLY_SOURCE_KINDS = {"delphi_fluview_ilinet_v5", "cdc_nndss_weekly_v1",
                        "cdc_wval_reporting_site_mean_v1"}
 MONTHLY_SOURCE_KINDS = {"bls_public_api_v1", "bls_public_api_v1_derived_v2",
+                        "fred_bls_series_csv_v1", "fred_bls_series_csv_v1_derived_v2",
                         "medicaid_state_performance_api"}
 ANNUAL_SOURCE_KINDS = {"cms_geographic_variation_api"}
 LIVE_OBSERVATION_KINDS = WEEKLY_SOURCE_KINDS | {
     "bls_public_api_v1", "bls_public_api_v1_derived_v2",
+    "fred_bls_series_csv_v1", "fred_bls_series_csv_v1_derived_v2",
     "medicaid_state_performance_api", "cms_geographic_variation_api",
     "openfda_drug_enforcement"}
 DEFAULT_DEFINITIONS = (Path(__file__).resolve().parents[1] / "catalog" /

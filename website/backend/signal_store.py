@@ -38,7 +38,7 @@ NEWS_VERSION_FIELDS = ("url_hash", "source_name", "title", "url", "source",
                        "matched_terms", "summary_text")
 # These optional, rate-limited source enrichments can fail without affecting
 # the validity or availability of the independently stored signal families.
-NON_BLOCKING_REFRESH_SOURCE_PREFIXES = ("bls_public_api_v1",)
+NON_BLOCKING_REFRESH_SOURCE_PREFIXES = ("bls_public_api_v1", "fred_bls_series_csv_v1")
 
 
 def is_non_blocking_refresh_source(source_name: str) -> bool:
@@ -1245,7 +1245,7 @@ def recent_public_signals(*, days: int = 3, limit: int = 12) -> list[dict]:
                   o.ingested_at DESC) AS position
             FROM signal_records o JOIN signal_definitions d ON d.id=o.signal_uid
             WHERE o.ingested_at>=? AND d.signal_origin='model_external_state_feature'
-              AND (o.source_kind IN ('bls_public_api_v1',
+              AND (o.source_kind IN ('bls_public_api_v1', 'fred_bls_series_csv_v1',
                 'medicaid_state_performance_api', 'cms_geographic_variation_api')
                 OR (o.source_kind='openfda_drug_enforcement'
                     AND d.entity_key='openfda_enforcement_class:total'

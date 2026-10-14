@@ -88,10 +88,10 @@ news IDs, whose live article estimates remain shadow-only. The 18 legacy ATC
 outputs and 194 unselected seeded drug outputs are retained as history and
 excluded from current coverage. The selected drug projections target 2026
 from 2024 source claims. The saved research artifact under `model/` is not a live backend
-checkpoint. Repeated BLS requests exhausted the public daily quota. The
-worker's explicit `--once` mode bypassed its scheduled cooldown, so a run-level
-cooldown now also guards the adapter itself. BLS is optional monthly context,
-refreshed at most weekly through every invocation path. Failures are retained
+checkpoint. Repeated requests exhausted the anonymous BLS API's daily quota.
+The three matching BLS series now refresh from FRED's public CSV mirror, with
+the FRED source URL recorded on new rows. The adapter checks at most weekly
+through every invocation path. Failures are retained
 in per-source diagnostics but excluded from general signal warnings; failed
 fetches write no partial BLS update and do not affect other source families or
 the drug ranking.
@@ -241,9 +241,9 @@ failure and the worker waits until both that deadline and the 24-hour minimum
 cooldown have passed. A transient DNS lookup failure gets a 30-minute retry
 delay; other source failures keep the six-hour cooldown. FDA
 successes remain visible even when GDELT is rate limited.
-It checks for failed sources every 15 minutes. BLS is checked at most weekly,
-and its adapter independently enforces that interval so explicit `--once`
-runs cannot bypass the public API quota guard.
+It checks for failed sources every 15 minutes. The FRED economic-series mirror
+is checked at most weekly, and its adapter independently enforces that interval
+for explicit `--once` runs.
 When a qualifying article version from the current or preceding UTC month is
 captured after the 20-signal shadow job last succeeded, the worker schedules
 another model run at its next 15-minute check. New article evidence also
@@ -503,7 +503,7 @@ most recent refresh failed. The worker report lists those sources without
 conflating an external outage with a stalled worker. These probes expose
 failures to the container runtime; route unhealthy-container and failed-source
 events to the chosen host's alert service before a public launch.
-Optional sources polled less often than daily, including BLS, are excluded from
+Optional sources polled less often than daily, including the FRED mirror, are excluded from
 this daily health gate; their adapter failures do not affect signal coverage.
 When `ENVIRONMENT=production`, startup requires a nontrivial signing key of at
 least 32 bytes, secure cookies, a bounded session lifetime, disabled legacy
@@ -553,7 +553,7 @@ keys:
 | Notifiable disease context | CDC NNDSS provisional weekly table for the six saved model disease labels, with Arkansas and U.S. rows | Public CDC Socrata access works locally without a key. Missing or suppressed metric cells remain absent. The four CDC measures are stored separately and are not yet the saved model's annual features. |
 | Wastewater context | CDC site-level WVAL dataset, aggregated as a transparent reporting-site mean for Arkansas and the U.S. | Public CDC Socrata access works locally without a key. Each value includes its contributing-site count; these means are not CDC's official geographic medians or validated live inputs for the saved demand model. |
 | Archived 20-output news estimate | Local TF-IDF/Ridge model prefers captured titles and summaries for the last closed UTC month, and falls back to a current-month-to-date estimate targeted at month end. Its JSON weights are SHA-256 pinned. Results are stored with `usable: false` as direct observations and may enter XGBoost forecasts as source-timestamped features. | No key; requires captured article text. |
-| Labor and price context | BLS Public Data API v1; CMS NADAC download | Public; no key configured. BLS checks run at most weekly because its observations are monthly and its anonymous endpoint has a strict daily quota. An adapter failure preserves prior observations and does not affect general signal coverage or ranking. |
+| Labor and price context | BLS series mirrored by FRED; CMS NADAC download | Public; no key configured. The FRED CSV feed replaces quota-limited anonymous BLS API requests. Checks run at most weekly because observations are monthly. An adapter failure preserves prior observations and does not affect general signal coverage or ranking. |
 | Arkansas public demand and context | CMS Part D catalog/source, CMS Geographic Variation API, Medicaid State Performance API, Arkansas SDUD downloads, and HHS NDC release catalog | Public; no key configured. The Part D source is checksum- and manifest-validated before the daily projection is published. |
 
 The production deployment still needs operator-managed secrets for session
@@ -684,14 +684,15 @@ as the known availability time. It prefers final updated rows for months where
 both preliminary and final versions are present. The live refresh recorded 650
 nonmissing values across 110 monthly periods and wrote no duplicates on a
 repeat run.
-The BLS adapter now refreshes three raw monthly series, 30 lag, difference,
+The economic-series adapter refreshes three raw monthly BLS series, 30 lag, difference,
 and rolling identities, and six seasonal identities. Its lag and rolling
 formulas were checked against 852 historical catalog values without a mismatch;
 the seasonal baseline and anomaly were checked against all 210 historical
 catalog values without a mismatch. The seasonal baseline uses all prior years
 from the same calendar month, starting with 2000 observations. The adapter
-requests official BLS v1 history in ten-year windows and retains gaps instead
-of filling missing months. It published 2026-08 observations for all 39 IDs.
+now requests the corresponding FRED CSV series and retains gaps instead of
+filling missing months. The earlier BLS API run published 2026-08 observations
+for all 39 IDs; FRED fetches retain their own source URL and kind.
 The CMS geographic-variation adapter checks nine national annual identities
 against the official dataset. The source still ends at 2024, matching all
 2023 and 2024 values already in the catalog. The worker records when it checked
@@ -957,7 +958,7 @@ remain explicitly unusable and must not be treated as observations.
 | [FDA MedWatch RSS](https://www.fda.gov/safety/medwatch-fda-safety-information-and-adverse-event-reporting-program/medwatch-rss-feed) | Checked independently for drug-keyword safety alerts. Device-only paths and items without drug terms are excluded; an empty three-day window stays empty. The RSS date is the feed item date, not a demand observation. | No key. |
 | [FDA Recalls RSS](https://www.fda.gov/about-fda/contact-fda/subscribe-podcasts-and-news-feeds) | Checked independently for recent drug-related recall notices. Food-only notices are excluded. The RSS date is the feed item date, not a demand observation. | No key. |
 | [FDA Press Releases RSS](https://www.fda.gov/about-fda/contact-fda/subscribe-podcasts-and-news-feeds) | Checked independently for recent drug-related announcements. Device-only and general regulatory releases are excluded. The RSS date is the feed item date, not a demand observation. | No key. |
-| [BLS Public Data API](https://www.bls.gov/developers/api_faqs.htm) | Weekly poll of three published monthly series through unregistered v1; records source months and preliminary flags, and derives the catalog's preceding-observation lags, differences, rolling values, and same-month historical baselines/anomalies. The first retrieval time is stored because the response omits a publication timestamp. Failed refreshes write no partial BLS update and are omitted from general signal warnings. | No key for v1. The initial history backfill uses nine queries; later refreshes use three. A seven-day adapter cooldown protects every invocation path. |
+| [FRED mirror of BLS series](https://fred.stlouisfed.org/series/ARURN) | Weekly poll of Arkansas unemployment, U.S. unemployment, and U.S. all-items CPI monthly CSV series; derives the catalog's preceding-observation lags, differences, rolling values, and same-month historical baselines/anomalies. The first retrieval time is stored because the CSV omits a publication timestamp. Failed refreshes write no partial update and are omitted from general signal warnings. Historical BLS API observations retain their original provenance. | No key. One CSV request per series; a seven-day adapter cooldown protects every invocation path. |
 | [Medicaid and CHIP enrollment and performance](https://data.medicaid.gov/dataset/6165f45b-ca93-5bb5-9d06-db29c692a360) | Daily poll of eight Arkansas monthly measures via the official data API. Preliminary and final revisions are distinguished; absent cells are skipped. The first retrieval time is stored because the row publication timestamp is unavailable. | No key for the public data API. |
 | [CMS Medicare Geographic Variation](https://data.cms.gov/summary-statistics-on-use-and-payments/medicare-geographic-comparisons/medicare-geographic-variation-by-national-state-county) | Daily check of nine national annual catalog measures. The latest official year is 2024 as of this check; no 2025 or 2026 value is inferred. | Public data API, no key. |
 | [NADAC 2026](https://data.medicaid.gov/dataset/fbb83258-11c7-47f5-8b18-5f8e79f7e704) | Daily full latest-date snapshot; computes rate counts and min/mean/max within each rate classification and pricing unit. It does not publish to four legacy IDs with collapsed dimensions. | No key for the public data API. Annual dataset ID rollover must be checked before 2027. |

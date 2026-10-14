@@ -22,9 +22,11 @@ UNSUPPORTED_KINDS = {SHADOW_KIND, "combined_demand_signals",
 WEEKLY_KINDS = {"delphi_fluview_ilinet_v5", "cdc_nndss_weekly_v1",
                 "cdc_wval_reporting_site_mean_v1"}
 MONTHLY_KINDS = {"bls_public_api_v1", "bls_public_api_v1_derived_v2",
+                 "fred_bls_series_csv_v1", "fred_bls_series_csv_v1_derived_v2",
                  "medicaid_state_performance_api"}
 ANNUAL_KINDS = {"cms_geographic_variation_api"}
 SOURCE_KINDS = WEEKLY_KINDS | {"bls_public_api_v1", "bls_public_api_v1_derived_v2",
+                               "fred_bls_series_csv_v1", "fred_bls_series_csv_v1_derived_v2",
                                "medicaid_state_performance_api",
                                "cms_geographic_variation_api", "openfda_drug_enforcement"}
 
@@ -132,10 +134,10 @@ def audit(base_url: str, *, require_source_refresh: bool = False,
                coverage["seeded_ids_without_usable_latest_value"] != expected_coverage):
         raise AssertionError("Freshness or seed coverage disagrees with latest values")
     live_kinds = {row["source_kind"] for row in usable.values()}
-    if require_source_refresh and not (WEEKLY_KINDS | {
-            "openfda_drug_enforcement", "bls_public_api_v1",
-            "medicaid_state_performance_api", "cms_geographic_variation_api"
-            }).issubset(live_kinds):
+    if require_source_refresh and (not (WEEKLY_KINDS | {
+            "openfda_drug_enforcement", "medicaid_state_performance_api",
+            "cms_geographic_variation_api"}).issubset(live_kinds)
+            or not {"bls_public_api_v1", "fred_bls_series_csv_v1"} & live_kinds):
         raise AssertionError("A required public source has no usable latest values")
 
     history_checked = []

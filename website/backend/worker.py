@@ -62,7 +62,7 @@ REFRESH_TASKS: tuple[tuple[Callable[[], dict], tuple[str, ...]], ...] = (
     (refresh_wastewater, ("cdc_wval_reporting_site_mean_v1",)),
     (refresh_enforcement, ("openfda_drug_enforcement",)),
     (refresh_shortages, ("openfda_shortages",)),
-    (refresh_bls, ("bls_public_api_v1",)),
+    (refresh_bls, ("fred_bls_series_csv_v1",)),
     (refresh_medicaid, ("medicaid_state_performance_api",)),
     (refresh_cms_geo, ("cms_geographic_variation_api",)),
     (refresh_nadac, ("medicaid_nadac_2026_api",)),
@@ -158,10 +158,8 @@ def due_tasks(now: datetime | None = None) -> list[Callable[[], dict]]:
                                    or failed_at[name][0] > latest_success_at[name])),
                              key=lambda item: item[0], default=None)
         if refresh is refresh_bls:
-            # BLS is a monthly, optional context source with a strict
-            # unauthenticated request quota. Space both successful refreshes
-            # and retries so manual runs or one quota response cannot cause
-            # daily polling or affect other signal families.
+            # Economic series are monthly context. Space successful refreshes
+            # and retries without affecting other signal families.
             last_bls_event = latest_success_at.get(names[0], datetime.min.replace(
                 tzinfo=timezone.utc))
             if latest_failure is not None and latest_failure[0] > last_bls_event:

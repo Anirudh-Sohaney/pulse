@@ -1,6 +1,6 @@
-"""Refresh BLS observations and derived catalog signals from the public v1 API.
+"""Refresh BLS economic series from FRED's public CSV mirror.
 
-BLS v1 supplies published month/value pairs without a publication timestamp.
+FRED supplies published month/value pairs without a publication timestamp.
 The first retrieval time is therefore the known availability time in PULSE.
 Revisions are retained as new rows; unchanged daily fetches add no rows.
 """
@@ -8,24 +8,27 @@ Revisions are retained as new rows; unchanged daily fetches add no rows.
 from __future__ import annotations
 
 import hashlib
+import csv
+import io
 import json
 import math
 import statistics
 from collections import defaultdict
 from calendar import monthrange
 from datetime import date, datetime, timedelta, timezone
+from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from .signal_store import connect, ensure_source_definition, initialize
 
 
 BLS_SERIES = {
-    "arkansas_unemployment_rate": "LAUST050000000000003",
-    "consumer_price_index_all_items": "CUUR0000SA0",
-    "national_unemployment_rate": "LNS14000000",
+    "arkansas_unemployment_rate": "ARURN",
+    "consumer_price_index_all_items": "CPIAUCNS",
+    "national_unemployment_rate": "UNRATE",
 }
-SOURCE_KIND = "bls_public_api_v1"
-DERIVED_KIND = "bls_public_api_v1_derived_v2"
+SOURCE_KIND = "fred_bls_series_csv_v1"
+DERIVED_KIND = "fred_bls_series_csv_v1_derived_v2"
 INVALID_DERIVED_KIND = "bls_public_api_v1_derived"
 BLS_REFRESH_INTERVAL = timedelta(days=7)
 
@@ -33,37 +36,29 @@ BLS_REFRESH_INTERVAL = timedelta(days=7)
 def fetch_series(series_id: str, *, timeout: int = 25,
                  start_year: int = 2000) -> list[dict]:
     if series_id not in BLS_SERIES.values():
-        raise ValueError("Unexpected BLS series ID")
-    url = "https://api.bls.gov/publicAPI/v1/timeseries/data/"
-    rows: list[dict] = []
-    current_year = datetime.now(timezone.utc).year
-    for start in range(start_year, current_year + 1, 10):
-        end = min(start + 9, current_year)
-        payload_body = json.dumps({"seriesid": [series_id],
-                                   "startyear": str(start), "endyear": str(end)}).encode()
-        request = Request(url, data=payload_body,
-                          headers={"User-Agent": "PULSE-public-signal-monitor/1.0",
-                                   "Content-Type": "application/json", "Accept": "application/json"})
-        with urlopen(request, timeout=timeout) as response:
-            payload = json.load(response)
-        if payload.get("status") != "REQUEST_SUCCEEDED":
-            raise ValueError(f"BLS request failed for {series_id}: {payload.get('message')}")
-        series = (payload.get("Results") or {}).get("series") or []
-        if len(series) != 1 or series[0].get("seriesID") != series_id:
-            raise ValueError(f"BLS response omitted requested series {series_id}")
-        page = series[0].get("data")
-        if not isinstance(page, list) or not page:
-            raise ValueError(f"BLS response contains no observations for {series_id}, {start}-{end}")
-        rows.extend(page)
+        raise ValueError("Unexpected FRED series ID")
+    url = ("https://fred.stlouisfed.org/graph/fredgraph.csv?"
+           + urlencode({"id": series_id, "cosd": f"{start_year}-01-01"}))
+    request = Request(url, headers={"User-Agent": "PULSE-public-signal-monitor/1.0",
+                                    "Accept": "text/csv"})
+    with urlopen(request, timeout=timeout) as response:
+        document = response.read().decode("utf-8-sig")
+    reader = csv.DictReader(io.StringIO(document))
+    if reader.fieldnames != ["observation_date", series_id]:
+        raise ValueError(f"FRED response omitted requested series {series_id}")
+    rows = [{"date": row["observation_date"], "value": row[series_id]}
+            for row in reader]
+    if not rows:
+        raise ValueError(f"FRED response contains no observations for {series_id}")
     return rows
 
 
 def stored_base_months(signal_name: str) -> list[tuple[str, float, str]]:
-    """Return the latest stored BLS revision for each historical month."""
+    """Return the latest stored BLS/FRED revision for each historical month."""
     with connect() as db:
         rows = db.execute("""SELECT r.observation_date, r.value, r.data_quality
             FROM signal_records r JOIN signal_definitions d ON d.id=r.signal_uid
-            WHERE d.signal_id=? AND r.source_kind=?
+            WHERE d.signal_id=? AND r.source_kind IN (?, 'bls_public_api_v1')
             ORDER BY r.observation_date, r.source_timestamp DESC, r.ingested_at DESC""",
             (signal_name, SOURCE_KIND)).fetchall()
     months: dict[str, tuple[str, float, str]] = {}
@@ -76,32 +71,26 @@ def stored_base_months(signal_name: str) -> list[tuple[str, float, str]]:
 
 
 def parse_months(rows: list[dict]) -> list[tuple[str, float, str]]:
-    """Accept only valid monthly observations, preserving preliminary flags."""
+    """Accept only valid monthly FRED observations."""
     parsed: dict[str, tuple[float, str]] = {}
     for row in rows:
-        period = str(row.get("period") or "")
-        year = str(row.get("year") or "")
-        if len(year) != 4 or not year.isdigit() or len(period) != 3 or not period.startswith("M"):
-            continue  # BLS may also include M13 annual averages.
         try:
-            month = int(period[1:])
-            if not 1 <= month <= 12:
-                continue
+            observation = date.fromisoformat(str(row.get("date") or ""))
+            if observation.day != 1:
+                raise ValueError("Expected a monthly FRED observation")
             value = float(str(row.get("value") or "").replace(",", ""))
             if not math.isfinite(value):
                 continue
-            end = date(int(year), month, monthrange(int(year), month)[1])
+            end = date(observation.year, observation.month,
+                       monthrange(observation.year, observation.month)[1])
         except (ValueError, TypeError):
             continue
         if end > datetime.now(timezone.utc).date():
             continue
-        footnotes = row.get("footnotes") or []
-        preliminary = any(str(note.get("code") or "").upper() == "P"
-                          for note in footnotes if isinstance(note, dict))
         day = end.isoformat()
         if day in parsed and parsed[day][0] != value:
-            raise ValueError(f"BLS returned conflicting values for {day}")
-        parsed[day] = (value, "preliminary" if preliminary else "published")
+            raise ValueError(f"FRED returned conflicting values for {day}")
+        parsed[day] = (value, "published")
     return [(day, *parsed[day]) for day in sorted(parsed)]
 
 
@@ -148,9 +137,8 @@ def derive_months(base_name: str, months: list[tuple[str, float, str]]) -> dict[
 def refresh_bls() -> dict:
     initialize()
     now = datetime.now(timezone.utc)
-    # Enforce the public API quota at the adapter boundary too. The worker's
-    # normal scheduler has the same cooldown, but explicit --once runs can
-    # otherwise call every adapter and exhaust BLS's anonymous daily budget.
+    # Space explicit --once runs as well as scheduled refreshes. FRED's CSV
+    # mirror needs no BLS API registration key or anonymous API quota.
     with connect() as db:
         latest_attempt = db.execute("""SELECT MAX(COALESCE(finished_at, started_at))
             AS attempted_at FROM refresh_runs WHERE source_name=?""",
@@ -177,7 +165,7 @@ def refresh_bls() -> dict:
             stored = stored_base_months(signal_name)
             # The first run backfills history. Later runs request only the
             # current and previous year, preserving older recorded months.
-            # This keeps the unregistered API's daily request budget intact.
+            # This keeps downloads small after the first backfill.
             start_year = (datetime.now(timezone.utc).year - 1
                           if len(stored) >= 24 and stored[0][0] <= "2000-01-31"
                           else 2000)
@@ -185,7 +173,7 @@ def refresh_bls() -> dict:
             months = sorted({day: (day, value, quality) for day, value, quality
                              in (*stored, *recent)}.values())
             if not months:
-                raise ValueError(f"BLS has no valid monthly values for {series_id}")
+                raise ValueError(f"FRED has no valid monthly values for {series_id}")
             fetched.update(derive_months(signal_name, months))
         retrieved = datetime.now(timezone.utc).isoformat()
         inserted = 0
@@ -196,7 +184,7 @@ def refresh_bls() -> dict:
                        (INVALID_DERIVED_KIND,))
             for signal_name, months in fetched.items():
                 base = next(name for name in BLS_SERIES if signal_name == name or signal_name.startswith(name + "_"))
-                source_url = "https://api.bls.gov/publicAPI/v1/timeseries/data/"
+                source_url = f"https://fred.stlouisfed.org/series/{BLS_SERIES[base]}"
                 uid = ensure_source_definition(
                     db, signal_id=signal_name, cadence="monthly",
                     geography_level="state" if base == "arkansas_unemployment_rate" else "national",
@@ -204,7 +192,9 @@ def refresh_bls() -> dict:
                     unit={"arkansas_unemployment_rate": "percent",
                           "national_unemployment_rate": "percent",
                           "consumer_price_index_all_items": "index"}[base],
-                    source_name="BLS Public Data API", source_url=source_url)
+                    source_name="BLS via FRED", source_url=source_url)
+                db.execute("""UPDATE signal_definitions SET source_name=?, source_url=?
+                    WHERE id=?""", ("BLS via FRED", source_url, uid))
                 kind = SOURCE_KIND if signal_name in BLS_SERIES else DERIVED_KIND
                 db.execute("""UPDATE signal_records SET source_url=?
                     WHERE signal_uid=? AND source_kind LIKE 'bls_public_api_v1%'
@@ -214,7 +204,7 @@ def refresh_bls() -> dict:
                         WHERE signal_uid=? AND observation_date=?
                         ORDER BY source_timestamp DESC, ingested_at DESC LIMIT 1""",
                         (uid, day)).fetchone()
-                    if latest and latest["source_kind"] == kind and math.isclose(latest["value"], value, rel_tol=1e-12, abs_tol=1e-12):
+                    if latest and math.isclose(latest["value"], value, rel_tol=1e-12, abs_tol=1e-12):
                         continue
                     row_hash = hashlib.sha256(json.dumps(
                         [uid, day, value, retrieved, kind], separators=(",", ":")
