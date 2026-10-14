@@ -57,6 +57,8 @@ def test_driver_features_reference_real_panel_columns():
         "recall_class_3", "shortage_reason_demand", "shortage_reason_discontinuation",
         "shortage_reason_ingredient", "shortage_reason_other",
         "labeler_shortage_n", "labeler_recall_n",
+        "arcos_distribution_grams", "arcos_distribution_zip3_count",
+        "arcos_distribution_growth",
     }
     referenced = {f for feats in DRIVER_FEATURES.values() for f in feats}
     assert referenced <= known

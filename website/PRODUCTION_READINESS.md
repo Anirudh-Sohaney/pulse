@@ -47,6 +47,16 @@ under a controlled burst, confirming the host rate limit. Reachable Git
 history has no tracked `.env`, secret directory, PEM, or key file; a current
 tracked-content scan found no common private-key or API-token formats.
 
+On 2026-10-14, the live Chromium smoke completed browser-side training from
+dated sales and inventory history, encrypted plan reload, idle locking,
+session revocation, and the private-file upload boundary. The deployed
+revision was `ace166a`; the public Pyodide module was served as JavaScript.
+The broader local research suite passed 365 tests and failed 15 before
+hydrating the FDA NDC LFS file. Its previously failing Medicaid feature-layer
+test passed after hydration. Missing generated research evaluation/panel
+artifacts and stale research assertions remain; those models are not ready for
+publication.
+
 ## Current local signal audit (2026-10-10)
 
 The checked-in seed manifest now has **1,250 IDs**: 1,212 CMS Part D demand
@@ -78,11 +88,10 @@ historical rather than a current release guarantee.
 
 The current website suite passed 88 tests, frontend lint and build passed,
 and the isolated built-browser smoke passed with three years of signal history
-and an injected 429 retry. A broader `model/tests` run passed 354 tests and
-failed 26. Several failures are blocked by local Git LFS pointer files rather
-than hydrated research datasets (including the publishable test suite);
-others refer to missing or stale evaluation artifacts. Those model gates are
-not satisfied, and the saved research model must remain outside the live API.
+and an injected 429 retry. A broader `model/tests` run on 2026-10-14 passed
+365 tests and failed 15 before the FDA NDC LFS file was hydrated. The remaining
+research gates are not satisfied, and the saved research model must remain
+outside the live API.
 
 The read-only live API audit passed across all 1,480 historical catalog IDs,
 1,136 usable latest IDs, and 1,018 ranked drugs after the tiered publication
