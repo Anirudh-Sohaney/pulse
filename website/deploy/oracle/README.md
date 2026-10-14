@@ -101,8 +101,8 @@ machine; its key is separately under `/root/pulse-recovery/keys/`, outside the
 repository, with owner-only permissions. Both copies matched the Oracle SHA-256
 hashes. The bundle decrypted locally and
 passed the full restore rehearsal on 2026-10-14. It is a point-in-time recovery
-copy, not an automated offsite backup schedule. An always-on independent backup
-destination is still needed for ongoing host-loss recovery.
+copy, not an automated offsite backup schedule. Independent host-loss backup
+was excluded from this deployment's scope at the operator's request.
 On 2026-10-13, an encrypted bundle was decrypted into a temporary directory
 and passed the full restore rehearsal with 1,480 catalog signals and 1,018
 ranked drugs.

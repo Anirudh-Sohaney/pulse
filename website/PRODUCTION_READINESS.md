@@ -98,6 +98,9 @@ the drug ranking.
 The Oracle worker's first FRED fetch timed out because FRED stalled responses
 to the adapter's custom User-Agent; a direct request with Python's default
 client succeeded from the same container. The adapter no longer sets that header.
+On 2026-10-14, the deployed adapter refreshed all three series successfully,
+wrote 13 changed base and derived observations, and passed the production
+signal-store and live API audits.
 
 This section supersedes earlier operational counts in the dated log below.
 Those entries preserve the history of the previous 1,312-ID manifest and
