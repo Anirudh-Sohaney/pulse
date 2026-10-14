@@ -58,6 +58,10 @@ training tests passed. A missing HHS evaluation artifact reference was
 replaced with a deterministic publication-gate test. The remaining research
 failures involve missing or stale local evaluation artifacts and their
 qualification expectations, so those models are not ready for publication.
+The current local metric-library audit qualifies one proxy candidate from
+available artifacts and fails all three Part One coverage gates. The
+leaderboard residual-model test now evaluates a deterministic panel directly
+instead of relying on a stale ignored CSV; all 23 next-period tests pass.
 The 2026-10-13 encrypted backup bundle and its key were copied outside the
 repository to the local WSL machine with owner-only permissions. Hashes matched
 the Oracle files, and the local copy decrypted and passed a full restore

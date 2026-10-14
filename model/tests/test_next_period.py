@@ -7,6 +7,7 @@ artifacts when present so the suite stays fast in CI.
 import json
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -235,10 +236,15 @@ def test_leaderboard_artifact_schema():
 
 
 def test_leaderboard_has_residual_models():
-    lb = Path(__file__).resolve().parents[1] / "artifacts" / "evaluation" / "leaderboard.csv"
-    if not lb.exists():
-        return
-    df = pd.read_csv(lb)
+    panel = _toy_annual_panel()
+    panel["demand_claims_lag1_log"] = np.log1p(
+        panel.groupby(["city", "drug_key"])["demand_claims"].shift(1))
+    # This historical claims feature is research-only, so exercise the full
+    # evaluation path instead of treating it as an operational input.
+    result = evaluate_next_period(panel, train_cutoff=2016, neural=True,
+                                  feature_mode="full")
+    assert "error" not in result
+    df = result["leaderboard"]
     required = {"residual_ridge_history", "residual_ridge_external",
                 "residual_ridge_full", "residual_neural", "residual_ensemble"}
     assert required <= set(df["model"])
