@@ -15,9 +15,10 @@ preflight, builds and starts Compose, checks the internal services and public
 HTTPS site, coverage API, and browser model file, then writes
 `/var/lib/pulse/deployed-commit`.
 
-A revision changing only the listed Markdown documentation files skips the
-container rebuild, checks the same live routes, and advances the recorded Git
-revision without interrupting the running application.
+A revision changing only the listed Markdown documentation files or research
+tests under `model/tests/` skips the container rebuild, checks the same live
+routes, and advances the recorded Git revision without interrupting the
+running application.
 
 For an immediate update:
 

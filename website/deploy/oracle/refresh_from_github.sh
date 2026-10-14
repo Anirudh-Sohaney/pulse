@@ -38,14 +38,14 @@ if [[ -n "$deployed" ]] && git cat-file -e "$deployed^{commit}" 2>/dev/null; the
   docs_only=true
   while IFS= read -r changed; do
     case "$changed" in
-      README.md|website/README.md|website/PRODUCTION_READINESS.md|website/docs.md|website/deploy/oracle/README.md) ;;
+      README.md|website/README.md|website/PRODUCTION_READINESS.md|website/docs.md|website/deploy/oracle/README.md|model/tests/*) ;;
       *) docs_only=false; break ;;
     esac
   done < <(git diff --name-only "$deployed" "$target")
 fi
 
 if [[ "$docs_only" == true ]]; then
-  echo 'Documentation-only revision; retaining the running containers'
+  echo 'Revision changes only documentation or research tests; retaining the running containers'
 else
   # Only hydrate the research artifact needed by the live CMS refresh.
   git lfs pull --include="$source_path" --exclude=''
