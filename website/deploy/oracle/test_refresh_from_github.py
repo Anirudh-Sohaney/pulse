@@ -55,6 +55,8 @@ def test_failed_container_start_restores_checkout_and_quarantines_commit():
             "  if [[ \"$*\" == *ExitCode* ]]; then echo 0; else echo healthy; fi\n"
             "  exit 0\n"
             "fi\n"
+            "if [[ \"$1\" == exec && \"$*\" == *audit_signal_store* "
+            "&& -n \"${MOCK_FAIL_AUDIT:-}\" ]]; then exit 1; fi\n"
             "if [[ \" $* \" == *' up '* && ! -e \"$MOCK_FIRST_UP\" ]]; then\n"
             "  touch \"$MOCK_FIRST_UP\"\n"
             "  exit 1\n"
@@ -106,6 +108,22 @@ def test_failed_container_start_restores_checkout_and_quarantines_commit():
         assert run("git", "rev-parse", "HEAD", cwd=repo) == fixed
         assert (state / "deployed-commit").read_text().strip() == fixed
         assert not (state / "rejected-deploy-commit").exists()
+        assert "exec website-backend-1 python -m scripts.audit_signal_store" in docker_log.read_text()
+        assert "exec website-backend-1 python -m scripts.audit_live_signal_api" in docker_log.read_text()
+
+        (repo / "website" / "bad-audit.txt").write_text("bad audit\n")
+        run("git", "add", ".", cwd=repo)
+        run("git", "commit", "-m", "candidate with failing audit", cwd=repo)
+        bad_audit = run("git", "rev-parse", "HEAD", cwd=repo)
+        run("git", "push", "origin", BRANCH, cwd=repo)
+        run("git", "reset", "--hard", fixed, cwd=repo)
+        audit_failed = subprocess.run(("bash", str(SCRIPT)),
+                                      env={**env, "MOCK_FAIL_AUDIT": "1"},
+                                      text=True, capture_output=True)
+        assert audit_failed.returncode != 0
+        assert run("git", "rev-parse", "HEAD", cwd=repo) == fixed
+        assert (state / "deployed-commit").read_text().strip() == fixed
+        assert (state / "rejected-deploy-commit").read_text().strip() == bad_audit
 
 
 if __name__ == "__main__":

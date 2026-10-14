@@ -131,6 +131,12 @@ for attempt in $(seq 1 60); do
          pulseintelligence.tech:443:127.0.0.1 \
          https://pulseintelligence.tech/api/v1/system/version |
          grep -Fq "\"runtime_revision\":\"$target\"" ); then
+    # Validate the restored catalog and public signal contract against the
+    # running data before declaring this revision deployed. A failed audit
+    # triggers the same checkout and container rollback as a failed startup.
+    docker exec website-backend-1 python -m scripts.audit_signal_store
+    docker exec website-backend-1 python -m scripts.audit_live_signal_api \
+      --base-url http://127.0.0.1:8000
     install -d -m 0700 "$state_dir"
     printf '%s\n' "$target" > "$state_file.tmp"
     mv "$state_file.tmp" "$state_file"

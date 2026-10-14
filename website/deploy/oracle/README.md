@@ -13,7 +13,8 @@ Commit and push tested changes to `codex/production-readiness`. The enabled
 non-fast-forward branch, hydrates the pinned CMS Git LFS source, runs cloud
 preflight, builds and starts Compose, checks the internal services and public
 HTTPS site, coverage API, browser model file, worker and backup health, and
-initializer exit status, then writes
+initializer exit status, then runs the read-only signal-store and live API
+audits before writing
 `/var/lib/pulse/deployed-commit`.
 Before replacing containers, it tags the running images for rollback. If the
 candidate fails after container startup, it restores the last deployed Git
