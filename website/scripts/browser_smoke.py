@@ -192,7 +192,8 @@ def run(base_url: str, signal_years: int = 0,
                 try:
                     signed_in = security_context.request.post(
                         base_url.rstrip("/") + "/api/auth/session",
-                        form={"username": username, "password": password})
+                        form={"username": username, "password": password},
+                        headers={"Origin": base_url.rstrip("/")})
                     assert signed_in.status == 200
                     security_page = security_context.new_page()
                     security_page.goto(base_url.rstrip("/") + "/dashboard",
