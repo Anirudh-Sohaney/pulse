@@ -116,4 +116,7 @@ Docker image contexts and repository commits. Current images have neither
 This branch currently has no GitHub Actions workflow. Use the local backend
 suite, frontend lint/build, isolated browser smoke, and live API audit as
 release checks until CI is restored with a GitHub credential permitted to add
-workflow files.
+workflow files. The configured GitHub Personal Access Token can push code and
+documentation but GitHub rejects workflow-file changes without `workflow`
+scope. The updater's post-start signal audits are independent of that token
+permission.
