@@ -12,8 +12,21 @@ Commit and push tested changes to `codex/production-readiness`. The enabled
 `refresh_from_github.sh` as `ubuntu`. It refuses dirty tracked files or a
 non-fast-forward branch, hydrates the pinned CMS Git LFS source, runs cloud
 preflight, builds and starts Compose, checks the internal services and public
-HTTPS site, coverage API, and browser model file, then writes
+HTTPS site, coverage API, browser model file, worker and backup health, and
+initializer exit status, then writes
 `/var/lib/pulse/deployed-commit`.
+Before replacing containers, it tags the running images for rollback. If the
+candidate fails after container startup, it restores the last deployed Git
+checkout and image tags, restarts those containers, and records the failed
+commit in `/var/lib/pulse/rejected-deploy-commit`. The timer skips that exact
+commit until a new revision arrives. After correcting a transient external
+failure, an operator can remove that rejection file and start the service to
+retry the same commit. A failed build before container startup restores the
+checkout while keeping the running containers and can retry automatically.
+
+The isolated rollback test is `python3 website/deploy/oracle/test_refresh_from_github.py`
+from the repository root. It uses a disposable Git remote and mocked Docker and
+HTTP commands; it does not touch the production checkout.
 
 A revision changing only the listed Markdown documentation files or research
 tests under `model/tests/` skips the container rebuild, checks the same live
