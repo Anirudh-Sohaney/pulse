@@ -110,7 +110,7 @@ def test_catch_up_retries_missing_news_source_after_fallback(tmp_path, monkeypat
     assert "refresh_gdelt_news" in due_after_cooldown
     assert "refresh_fda_drugs_news" not in due_after_cooldown
     assert "refresh_fda_medwatch_news" in due_after_cooldown
-    assert "refresh_bls" not in due_after_cooldown
+    assert "refresh_bls" in due_after_cooldown
     due_after_bls_interval = {task.__name__ for task in worker.due_tasks(utc(10, 16))}
     assert "refresh_bls" in due_after_bls_interval
 

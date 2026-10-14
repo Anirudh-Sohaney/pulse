@@ -91,7 +91,7 @@ from 2024 source claims. The saved research artifact under `model/` is not a liv
 checkpoint. Repeated requests exhausted the anonymous BLS API's daily quota.
 The three matching BLS series now refresh from FRED's public CSV mirror, with
 the FRED source URL recorded on new rows. The adapter checks at most weekly
-through every invocation path. Failures are retained
+after success and retries failed network reads after six hours. Failures are retained
 in per-source diagnostics but excluded from general signal warnings; failed
 fetches write no partial BLS update and do not affect other source families or
 the drug ranking.
@@ -242,8 +242,8 @@ cooldown have passed. A transient DNS lookup failure gets a 30-minute retry
 delay; other source failures keep the six-hour cooldown. FDA
 successes remain visible even when GDELT is rate limited.
 It checks for failed sources every 15 minutes. The FRED economic-series mirror
-is checked at most weekly, and its adapter independently enforces that interval
-for explicit `--once` runs.
+is checked at most weekly after success and retried after six hours on failure.
+Its adapter independently enforces those intervals for explicit `--once` runs.
 When a qualifying article version from the current or preceding UTC month is
 captured after the 20-signal shadow job last succeeded, the worker schedules
 another model run at its next 15-minute check. New article evidence also
@@ -958,7 +958,7 @@ remain explicitly unusable and must not be treated as observations.
 | [FDA MedWatch RSS](https://www.fda.gov/safety/medwatch-fda-safety-information-and-adverse-event-reporting-program/medwatch-rss-feed) | Checked independently for drug-keyword safety alerts. Device-only paths and items without drug terms are excluded; an empty three-day window stays empty. The RSS date is the feed item date, not a demand observation. | No key. |
 | [FDA Recalls RSS](https://www.fda.gov/about-fda/contact-fda/subscribe-podcasts-and-news-feeds) | Checked independently for recent drug-related recall notices. Food-only notices are excluded. The RSS date is the feed item date, not a demand observation. | No key. |
 | [FDA Press Releases RSS](https://www.fda.gov/about-fda/contact-fda/subscribe-podcasts-and-news-feeds) | Checked independently for recent drug-related announcements. Device-only and general regulatory releases are excluded. The RSS date is the feed item date, not a demand observation. | No key. |
-| [FRED mirror of BLS series](https://fred.stlouisfed.org/series/ARURN) | Weekly poll of Arkansas unemployment, U.S. unemployment, and U.S. all-items CPI monthly CSV series; derives the catalog's preceding-observation lags, differences, rolling values, and same-month historical baselines/anomalies. The first retrieval time is stored because the CSV omits a publication timestamp. Failed refreshes write no partial update and are omitted from general signal warnings. Historical BLS API observations retain their original provenance. | No key. One CSV request per series; a seven-day adapter cooldown protects every invocation path. |
+| [FRED mirror of BLS series](https://fred.stlouisfed.org/series/ARURN) | Weekly poll of Arkansas unemployment, U.S. unemployment, and U.S. all-items CPI monthly CSV series; derives the catalog's preceding-observation lags, differences, rolling values, and same-month historical baselines/anomalies. The first retrieval time is stored because the CSV omits a publication timestamp. Failed refreshes write no partial update and are omitted from general signal warnings. Historical BLS API observations retain their original provenance. | No key. One CSV request per series; a seven-day cooldown follows success and a six-hour cooldown follows failure. |
 | [Medicaid and CHIP enrollment and performance](https://data.medicaid.gov/dataset/6165f45b-ca93-5bb5-9d06-db29c692a360) | Daily poll of eight Arkansas monthly measures via the official data API. Preliminary and final revisions are distinguished; absent cells are skipped. The first retrieval time is stored because the row publication timestamp is unavailable. | No key for the public data API. |
 | [CMS Medicare Geographic Variation](https://data.cms.gov/summary-statistics-on-use-and-payments/medicare-geographic-comparisons/medicare-geographic-variation-by-national-state-county) | Daily check of nine national annual catalog measures. The latest official year is 2024 as of this check; no 2025 or 2026 value is inferred. | Public data API, no key. |
 | [NADAC 2026](https://data.medicaid.gov/dataset/fbb83258-11c7-47f5-8b18-5f8e79f7e704) | Daily full latest-date snapshot; computes rate counts and min/mean/max within each rate classification and pricing unit. It does not publish to four legacy IDs with collapsed dimensions. | No key for the public data API. Annual dataset ID rollover must be checked before 2027. |

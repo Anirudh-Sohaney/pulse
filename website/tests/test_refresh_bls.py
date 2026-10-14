@@ -1,6 +1,7 @@
 """Economic context keeps BLS series identities without the BLS API quota."""
 
 import io
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -54,3 +55,19 @@ def test_fred_months_reject_future_and_missing_values():
         {"date": "2099-01-01", "value": "3.0"},
     ])
     assert months == [("2026-02-28", 3.5, "published")]
+
+
+def test_failed_fred_fetch_has_six_hour_adapter_cooldown(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "DATA_PATH", str(tmp_path))
+    signal_store.initialize()
+    recent = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+    with signal_store.connect() as db:
+        db.execute("""INSERT INTO refresh_runs
+            (source_name, started_at, finished_at, status, error)
+            VALUES ('fred_bls_series_csv_v1', ?, ?, 'failed', 'read timed out')""",
+            (recent, recent))
+    monkeypatch.setattr(refresh_bls, "fetch_series", lambda *args, **kwargs:
+                        pytest.fail("cooldown must prevent a fetch"))
+    result = refresh_bls.refresh_bls()
+    assert result["status"] == "skipped"
+    assert result["reason"] == "refresh_cooldown"

@@ -31,9 +31,10 @@ SOURCE_KIND = "fred_bls_series_csv_v1"
 DERIVED_KIND = "fred_bls_series_csv_v1_derived_v2"
 INVALID_DERIVED_KIND = "bls_public_api_v1_derived"
 BLS_REFRESH_INTERVAL = timedelta(days=7)
+FAILED_REFRESH_INTERVAL = timedelta(hours=6)
 
 
-def fetch_series(series_id: str, *, timeout: int = 25,
+def fetch_series(series_id: str, *, timeout: int = 90,
                  start_year: int = 2000) -> list[dict]:
     if series_id not in BLS_SERIES.values():
         raise ValueError("Unexpected FRED series ID")
@@ -140,18 +141,20 @@ def refresh_bls() -> dict:
     # Space explicit --once runs as well as scheduled refreshes. FRED's CSV
     # mirror needs no BLS API registration key or anonymous API quota.
     with connect() as db:
-        latest_attempt = db.execute("""SELECT MAX(COALESCE(finished_at, started_at))
-            AS attempted_at FROM refresh_runs WHERE source_name=?""",
-            (SOURCE_KIND,)).fetchone()["attempted_at"]
+        latest_attempt = db.execute("""SELECT COALESCE(finished_at, started_at) AS attempted_at,
+            status FROM refresh_runs WHERE source_name=? ORDER BY id DESC LIMIT 1""",
+            (SOURCE_KIND,)).fetchone()
     if latest_attempt:
         try:
-            attempted_at = datetime.fromisoformat(latest_attempt)
+            attempted_at = datetime.fromisoformat(latest_attempt["attempted_at"])
             if attempted_at.tzinfo is None:
                 attempted_at = attempted_at.replace(tzinfo=timezone.utc)
-            if now - attempted_at < BLS_REFRESH_INTERVAL:
+            interval = (BLS_REFRESH_INTERVAL if latest_attempt["status"] == "success"
+                        else FAILED_REFRESH_INTERVAL)
+            if now - attempted_at < interval:
                 return {"source": SOURCE_KIND, "status": "skipped",
-                        "reason": "seven_day_refresh_cooldown",
-                        "next_attempt_at": (attempted_at + BLS_REFRESH_INTERVAL).isoformat()}
+                        "reason": "refresh_cooldown",
+                        "next_attempt_at": (attempted_at + interval).isoformat()}
         except ValueError:
             # An invalid legacy timestamp must not permanently disable refresh.
             pass

@@ -41,6 +41,7 @@ SCHEDULE_HOUR_UTC = 16
 RETRY_POLL_SECONDS = 15 * 60
 RETRY_DELAY = timedelta(hours=6)
 BLS_REFRESH_INTERVAL = timedelta(days=7)
+BLS_FAILURE_RETRY_INTERVAL = timedelta(hours=6)
 TRANSIENT_DNS_RETRY_DELAY = timedelta(minutes=30)
 GDELT_RATE_LIMIT_RETRY_DELAY = timedelta(hours=24)
 NEWS_MODEL_RETRY_DELAY = timedelta(hours=24)
@@ -160,11 +161,15 @@ def due_tasks(now: datetime | None = None) -> list[Callable[[], dict]]:
         if refresh is refresh_bls:
             # Economic series are monthly context. Space successful refreshes
             # and retries without affecting other signal families.
-            last_bls_event = latest_success_at.get(names[0], datetime.min.replace(
+            last_bls_success = latest_success_at.get(names[0], datetime.min.replace(
                 tzinfo=timezone.utc))
-            if latest_failure is not None and latest_failure[0] > last_bls_event:
+            if latest_failure is not None and latest_failure[0] > last_bls_success:
+                interval = BLS_FAILURE_RETRY_INTERVAL
                 last_bls_event = latest_failure[0]
-            if current - last_bls_event < BLS_REFRESH_INTERVAL:
+            else:
+                interval = BLS_REFRESH_INTERVAL
+                last_bls_event = last_bls_success
+            if current - last_bls_event < interval:
                 continue
         if (all_sources_succeeded and latest_failure is None
                 and not news_evidence_changed and not source_newer_than_baseline):
