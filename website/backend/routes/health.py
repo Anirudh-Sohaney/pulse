@@ -2,7 +2,7 @@
 
 import os
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Response
 from fastapi.responses import JSONResponse
 
 from .. import signal_store
@@ -11,8 +11,9 @@ router = APIRouter()
 
 
 @router.get("/api/v1/system/version")
-async def runtime_version():
+async def runtime_version(response: Response):
     """Expose the source revision used to start this API process."""
+    response.headers["Cache-Control"] = "no-store"
     return {"runtime_revision": os.environ.get("PULSE_REVISION") or None}
 
 

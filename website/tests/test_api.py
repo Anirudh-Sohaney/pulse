@@ -25,6 +25,7 @@ def test_runtime_version(client, monkeypatch):
     response = client.get("/api/v1/system/version")
     assert response.status_code == 200
     assert response.json() == {"runtime_revision": "a" * 40}
+    assert response.headers["Cache-Control"] == "no-store"
 
 
 def test_registration_login_and_account_status(client):
