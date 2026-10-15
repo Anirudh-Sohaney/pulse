@@ -82,7 +82,7 @@ if [[ -n "$deployed" ]] && git cat-file -e "$deployed^{commit}" 2>/dev/null; the
   docs_only=true
   while IFS= read -r changed; do
     case "$changed" in
-      README.md|website/README.md|website/PRODUCTION_READINESS.md|website/docs.md|website/deploy/oracle/README.md|model/tests/*) ;;
+      *.md|model/tests/*) ;;
       *) docs_only=false; break ;;
     esac
   done < <(git diff --name-only "$deployed" "$target")
