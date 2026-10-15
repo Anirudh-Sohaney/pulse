@@ -51,7 +51,12 @@ The purged historical recipe closely reproduces the earlier synthetic result of 
   15.8%. Mean selected three-state accuracy was 67.6% (40.2% balanced), below
   the project's 75% promotion goal. The 2025 test fold selected a model with
   5.23% WAPE against 7.34% for its strongest naive baseline. These scores
-  remain research evidence: source vintages before the 2026 archive capture
+  weaken under the unrestricted future-window protocol: eight of nine folds
+  beat their strongest naive baseline, only three clear 10%, and mean
+  improvement is 9.2%, below that protocol's 10% gate. Both rolling reports
+  are saved locally as `quarterly_rolling_1y_live_target_metrics.json` and
+  `quarterly_rolling_live_target_metrics.json` under `model/artifacts/evaluation/`.
+  These remain research evidence: source vintages before the 2026 archive capture
   were not retained, suppressed counts remain unknown, and the latest source
   period is 2026-Q1, so a next-quarter forecast would target the already-past
   2026-Q2. No quarterly forecast was promoted.
