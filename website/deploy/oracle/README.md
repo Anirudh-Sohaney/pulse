@@ -42,10 +42,21 @@ ssh dev_server 'git -C /opt/pulse rev-parse HEAD; cat /var/lib/pulse/deployed-co
 ```
 
 The host Nginx site, proxy-header include, firewall unit, Certbot renewal hook,
-and systemd update units are installed separately from container updates.
+and systemd update and watchdog units are installed separately from container updates.
 Changes to those tracked host files require a deliberate host installation and
 Nginx/systemd validation before the tracked commit can be considered fully
 deployed. The update service cannot modify root-owned host configuration.
+
+The enabled `pulse-watchdog.timer` checks the four containers and the local
+public HTTPS proxy every two minutes. Docker's health checks cover the backend,
+worker, backup, and frontend. Two failed checks trigger a restart of the
+affected container, or Nginx when both local upstreams are healthy. The
+watchdog shares the updater lock, so it skips checks during a deployment.
+Install or update its host units after the tracked checkout is deployed:
+
+```bash
+ssh dev_server 'sudo install -m 0644 /opt/pulse/website/deploy/oracle/pulse-watchdog.service /etc/systemd/system/pulse-watchdog.service && sudo install -m 0644 /opt/pulse/website/deploy/oracle/pulse-watchdog.timer /etc/systemd/system/pulse-watchdog.timer && sudo systemctl daemon-reload && sudo systemctl enable --now pulse-watchdog.timer'
+```
 
 ## Runtime checks
 
@@ -53,7 +64,7 @@ deployed. The update service cannot modify root-owned host configuration.
 ssh dev_server 'sudo docker ps'
 ssh dev_server 'sudo docker exec website-worker-1 python -m scripts.operational_status sources'
 ssh dev_server 'sudo docker exec website-backup-1 python -m scripts.operational_status backup'
-ssh dev_server 'sudo nginx -t -q && sudo systemctl is-active nginx docker pulse-update.timer certbot.timer pulse-firewall.service'
+ssh dev_server 'sudo nginx -t -q && sudo systemctl is-active nginx docker pulse-update.timer pulse-watchdog.timer certbot.timer pulse-firewall.service'
 ssh dev_server 'sudo certbot renew --dry-run'
 ```
 

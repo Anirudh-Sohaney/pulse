@@ -1,0 +1,11 @@
+[Unit]
+Description=Check and repair PULSE local web services
+After=docker.service nginx.service
+Wants=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/pulse/website/deploy/oracle/watchdog.py
+TimeoutStartSec=3min
+UMask=0077
+NoNewPrivileges=true

@@ -1,0 +1,12 @@
+[Unit]
+Description=Check PULSE web services every two minutes
+
+[Timer]
+OnBootSec=3min
+OnUnitInactiveSec=2min
+AccuracySec=15s
+Persistent=true
+Unit=pulse-watchdog.service
+
+[Install]
+WantedBy=timers.target

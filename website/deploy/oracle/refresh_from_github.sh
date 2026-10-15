@@ -116,6 +116,7 @@ for attempt in $(seq 1 60); do
      curl --fail --silent --max-time 5 http://127.0.0.1:3141/ >/dev/null &&
      [[ $(docker inspect -f '{{.State.Health.Status}}' website-worker-1) == healthy ]] &&
      [[ $(docker inspect -f '{{.State.Health.Status}}' website-backup-1) == healthy ]] &&
+     [[ $(docker inspect -f '{{.State.Health.Status}}' website-frontend-1) == healthy ]] &&
      [[ $(docker inspect -f '{{.State.ExitCode}}' website-data-permissions-1) == 0 ]] &&
      curl --fail --silent --max-time 5 --resolve \
        pulseintelligence.tech:443:127.0.0.1 \
