@@ -216,29 +216,33 @@ def refresh_cms_partd_source() -> dict:
         if latest_year < current_year:
             raise ValueError(f"CMS catalog latest year {latest_year} predates local year {current_year}")
         published_new_years = sorted(year for year in releases if year > current_year)
-        verify_current = (current_year in releases and
-                          (releases[current_year] != urls[years.index(current_year)]
-                           or manifest.get("latest_source_verified_url") != releases[current_year]
-                           or (latest_year == current_year and
-                               (latest_revision is None or
-                                latest_revision != manifest.get(
-                                    "latest_source_verified_last_modified")))))
+        # A revised historical file changes the labels used by rolling
+        # evaluation too. Recheck every changed annual URL, not only the most
+        # recent year, while HEAD checks the latest year's in-place revision.
+        verify_years = {year for year, url in zip(years, urls)
+                        if year in releases and releases[year] != url}
+        if (current_year in releases and
+                (manifest.get("latest_source_verified_url") != releases[current_year]
+                 or (latest_year == current_year and
+                     (latest_revision is None or latest_revision != manifest.get(
+                         "latest_source_verified_last_modified"))))):
+            verify_years.add(current_year)
         metadata_changed = (latest_revision is not None
                             and latest_revision != manifest.get("latest_source_last_modified"))
-        changed = bool(published_new_years or verify_current or metadata_changed)
+        changed = bool(published_new_years or verify_years or metadata_changed)
         rows_written = 0
         if changed:
             replacements = []
-            if verify_current:
-                downloaded = download_arkansas_year(releases[current_year], current_year)
+            for year in sorted(verify_years):
+                downloaded = download_arkansas_year(releases[year], year)
                 columns = ["year", "state", "drug_key", "demand_claims"]
-                prior = existing[existing["year"] == current_year][columns].sort_values(
+                prior = existing[existing["year"] == year][columns].sort_values(
                     "drug_key").reset_index(drop=True)
                 checked = downloaded[columns].sort_values("drug_key").reset_index(drop=True)
                 if not prior.equals(checked):
                     replacements.append(downloaded)
-                    existing = existing[existing["year"] != current_year]
-                urls[years.index(current_year)] = releases[current_year]
+                    existing = existing[existing["year"] != year]
+                urls[years.index(year)] = releases[year]
             for year in published_new_years:
                 replacements.append(download_arkansas_year(releases[year], year))
                 years.append(year)
