@@ -195,3 +195,9 @@ def latest_sdud(search: str = Query("", max_length=120), limit: int = Query(100,
                 offset: int = Query(0, ge=0)):
     """Observed Arkansas Medicaid prescriptions; suppressed cells remain unknown."""
     return signal_store.latest_sdud_snapshot(search=search.strip(), limit=limit, offset=offset)
+
+
+@router.get("/sources/sdud/archive")
+def sdud_archive():
+    """Dated annual release coverage for the quarterly Medicaid target."""
+    return signal_store.sdud_archive_summary()

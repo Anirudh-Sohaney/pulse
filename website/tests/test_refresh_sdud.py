@@ -3,8 +3,10 @@
 from datetime import datetime, timezone
 
 import pytest
+from fastapi.testclient import TestClient
 
 from backend import refresh_sdud, signal_store
+from backend.app import create_app
 from backend.config import settings
 
 
@@ -48,6 +50,14 @@ def test_refresh_archives_unchanged_years_and_keeps_newest_period(tmp_path, monk
     assert first["rows_written"] == 6
     assert fetched == [2023, 2024, 2025]
     assert signal_store.latest_sdud_snapshot(limit=1)["period"] == "2025-Q4"
+    archive = signal_store.sdud_archive_summary()
+    assert archive["newest_period"] == "2025-Q4"
+    assert [row["year"] for row in archive["releases"]] == [2025, 2024, 2023]
+    assert all(row["quarters"] == [4] and row["suppressed_rows"] == 1
+               for row in archive["releases"])
+    response = TestClient(create_app()).get("/api/v1/signals/sources/sdud/archive")
+    assert response.status_code == 200
+    assert response.json()["newest_period"] == "2025-Q4"
 
     second = refresh_sdud.refresh_sdud()
     assert second["rows_written"] == 0

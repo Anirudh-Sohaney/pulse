@@ -177,6 +177,7 @@ function SourcesTopic() {
           <Endpoint path="/api/v1/signals/sources/shortages/recent">Recent public shortage observations.</Endpoint>
           <Endpoint path="/api/v1/signals/sources/nadac/latest">Dated NADAC acquisition-rate context. It is not a live retail price.</Endpoint>
           <Endpoint path="/api/v1/signals/sources/sdud/latest">Observed Arkansas Medicaid prescription counts with search and paging. Suppressed unknown values remain unknown, not zero.</Endpoint>
+          <Endpoint path="/api/v1/signals/sources/sdud/archive">Show retained annual SDUD releases, available quarters, suppression, source dates, and hashes. These are observed target sources, not forecasts.</Endpoint>
         </div>
       </Section>
       <Section eyebrow="Surveillance" title="Compare like with like">

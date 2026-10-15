@@ -1354,3 +1354,37 @@ def latest_sdud_snapshot(*, search: str = "", limit: int = 100,
             "reported_prescriptions_lower_bound": coverage["reported_prescriptions_lower_bound"],
             "products": rows, "count": len(rows), "filtered_total": total,
             "note": "Arkansas Medicaid quarterly prescription counts, grouped by reported product name. Suppressed NDC rows have unknown counts; totals are lower bounds, not complete demand or pharmacy purchase quantities."}
+
+
+def sdud_archive_summary() -> dict:
+    """Show the newest retained source revision for each annual SDUD release."""
+    initialize()
+    releases = []
+    with connect() as db:
+        snapshots = db.execute("""SELECT * FROM sdud_snapshots
+            ORDER BY source_year DESC, last_seen_at DESC, retrieved_at DESC""")
+        seen_years = set()
+        for snapshot in snapshots:
+            year = int(snapshot["source_year"])
+            if year in seen_years:
+                continue
+            seen_years.add(year)
+            quarters = [int(row[0]) for row in db.execute("""SELECT DISTINCT quarter
+                FROM sdud_rows WHERE content_hash=? ORDER BY quarter""",
+                (snapshot["content_hash"],))]
+            releases.append({
+                "year": year, "quarters": quarters,
+                "latest_quarter": int(snapshot["latest_quarter"]),
+                "source_rows": int(snapshot["row_count"]),
+                "suppressed_rows": int(snapshot["suppressed_rows"]),
+                "reported_prescriptions_lower_bound": int(snapshot["reported_prescriptions"]),
+                "source_modified_at": snapshot["source_modified_at"],
+                "first_retrieved_at": snapshot["retrieved_at"],
+                "last_checked_at": snapshot["last_seen_at"],
+                "source_url": snapshot["source_url"],
+                "source_hash": snapshot["content_hash"],
+            })
+    return {"releases": releases, "count": len(releases),
+            "newest_period": (f"{releases[0]['year']}-Q{releases[0]['latest_quarter']}"
+                              if releases else None),
+            "note": "Official Arkansas Medicaid SDUD revisions. Suppressed rows have unknown counts, so reported prescription sums are lower bounds. These observations do not establish current pharmacy dispensing or a forecast."}

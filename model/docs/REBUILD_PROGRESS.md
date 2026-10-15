@@ -1,6 +1,6 @@
 # Model rebuild progress
 
-**Last updated:** 2026-10-11
+**Last updated:** 2026-10-15
 **Status:** Multi-horizon synthetic XGBoost artifacts are saved under `model/trained/synthetic_horizon_xgb_v1/`. Article-text 20-signal inference remains a quarantined shadow path; real-world production validation is outstanding.
 
 ## Current result
@@ -31,6 +31,17 @@ The earlier local demand forecaster predicted 14-day unit totals for 30 syntheti
 The purged historical recipe closely reproduces the earlier synthetic result of 29.40% versus 32.35%. Its comparison uses the repository's existing final date window and synthetic data; it is not evidence on observed pharmacy sales.
 
 ## Work completed
+
+- On 2026-10-15, the Oracle source worker retained official Arkansas Medicaid
+  SDUD releases for 2023-Q1 through 2025-Q4 and 2026-Q1, adding 272,904
+  NDC/utilization rows beyond the previously stored 2026 snapshot. The public
+  archive route reports each release's quarters, suppression, source timestamp,
+  retrieval timestamp, and hash. The annual files have 90,367, 90,533, and
+  92,004 rows for 2023, 2024, and 2025 respectively; 2026-Q1 has 22,703.
+  Suppressed rows remain unknown. This closes the historical source gap after
+  the model's 2022 panel, but the newest observed quarter is still 2026-Q1:
+  its one-quarter-ahead target is 2026-Q2, already past as of this review.
+  No current quarterly demand forecast was promoted from this backfill.
 
 - On 2026-10-11, added and ran `arkansas_pharma_signal/synthetic_horizon_xgb.py` over 30 drugs and four direct future-unit windows. Saved 240 checksum-pinned XGBoost boosters, one manifest with five selected signal identities and scores for each drug/horizon, a command-line trainer, and a held-out synthetic replay command. Verified 120 drug/horizon rows, five distinct signals in each, loadability/checksums of every booster, and replay inference for both sales-only and signal-selected models.
 
