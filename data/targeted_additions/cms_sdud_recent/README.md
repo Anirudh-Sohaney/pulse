@@ -5,8 +5,11 @@ files used by the opt-in `--live-sdud-url` refresh path. The source manifest
 records the exact URLs, coverage, transformation, and limitations.
 
 The files are quarterly Medicaid utilization targets, not real-time pharmacy
-inventory observations and not operational feature inputs. The 2024 source is
-only available through Q2. Missing quarters are intentionally left missing;
+inventory observations and not operational feature inputs. The archived 2024
+CSV snapshot used by the opt-in experiment ended at Q2. The current official
+Medicaid dataset API has since returned Q1-Q4 for 2024; the website's SDUD
+adapter retains that newer release separately with its source modification and
+retrieval timestamps. Missing quarters in any source version remain missing;
 the model's consecutive-quarter target contract excludes transitions across
 those gaps.
 

@@ -23,6 +23,7 @@ from .signal_store import connect, initialize
 CATALOG_URL = "https://data.medicaid.gov/api/1/metastore/schemas/dataset/items"
 SOURCE_KIND = "medicaid_sdud_arkansas"
 PAGE_SIZE = 5000
+ARCHIVE_START_YEAR = 2023  # The research panel already contains 2012-2022.
 TITLE_PATTERN = re.compile(r"State Drug Utilization Data (20\d{2})")
 
 
@@ -41,14 +42,15 @@ class SourceRelease:
         return f"https://data.medicaid.gov/api/1/datastore/query/{self.dataset_id}/0"
 
 
-def select_latest_release(catalog: list[dict], *, today_year: int) -> SourceRelease:
+def select_releases(catalog: list[dict], *, today_year: int) -> list[SourceRelease]:
+    """Keep a continuous public target history after the research panel ends."""
     releases: list[SourceRelease] = []
     for item in catalog:
         match = TITLE_PATTERN.fullmatch(str(item.get("title") or ""))
         if not match:
             continue
         year = int(match.group(1))
-        if year > today_year:
+        if year > today_year or year < ARCHIVE_START_YEAR:
             continue
         dataset_id = str(item.get("identifier") or "")
         try:
@@ -61,21 +63,29 @@ def select_latest_release(catalog: list[dict], *, today_year: int) -> SourceRele
         releases.append(SourceRelease(year, dataset_id, modified.astimezone(timezone.utc).isoformat()))
     if not releases:
         raise ValueError("Medicaid catalog has no dated SDUD release")
-    latest_year = max(row.year for row in releases)
-    latest = [row for row in releases if row.year == latest_year]
-    if len(latest) != 1:
-        raise ValueError(f"Medicaid catalog has no unique SDUD release for {latest_year}")
-    return latest[0]
+    by_year = {row.year: row for row in releases}
+    latest_year = max(by_year)
+    if len(by_year) != len(releases) or set(by_year) != set(range(ARCHIVE_START_YEAR, latest_year + 1)):
+        raise ValueError("Medicaid catalog lacks a unique continuous SDUD release history")
+    return [by_year[year] for year in sorted(by_year)]
 
 
-def discover_latest_release() -> SourceRelease:
+def select_latest_release(catalog: list[dict], *, today_year: int) -> SourceRelease:
+    return select_releases(catalog, today_year=today_year)[-1]
+
+
+def discover_releases() -> list[SourceRelease]:
     request = Request(CATALOG_URL, headers={
         "User-Agent": "PULSE-public-signal-monitor/1.0", "Accept": "application/json"})
     with urlopen(request, timeout=40) as response:
         catalog = json.load(response)
     if not isinstance(catalog, list):
         raise ValueError("Medicaid metastore did not return a dataset list")
-    return select_latest_release(catalog, today_year=datetime.now(timezone.utc).year)
+    return select_releases(catalog, today_year=datetime.now(timezone.utc).year)
+
+
+def discover_latest_release() -> SourceRelease:
+    return discover_releases()[-1]
 
 
 def _url(release: SourceRelease, offset: int) -> str:
@@ -156,46 +166,70 @@ def refresh_sdud() -> dict:
         run_id = db.execute("""INSERT INTO refresh_runs(source_name, started_at, status)
             VALUES (?, ?, 'running')""", (SOURCE_KIND, started)).lastrowid
     try:
-        release = discover_latest_release()
-        normalized = normalize(fetch_rows(release), source_year=release.year)
-        latest_quarter = max(row[1] for row in normalized)
-        digest = hashlib.sha256(json.dumps(normalized, separators=(",", ":"),
-                                         ensure_ascii=False).encode()).hexdigest()
-        suppressed = sum(row[6] for row in normalized)
-        reported = sum(row[5] or 0 for row in normalized)
-        retrieved = datetime.now(timezone.utc).isoformat()
+        releases = discover_releases()
+        written = 0
+        checked_years = []
+        for release in releases:
+            with connect() as db:
+                current = db.execute("""SELECT content_hash, row_count, latest_quarter,
+                    suppressed_rows, reported_prescriptions FROM sdud_snapshots
+                    WHERE source_year=? AND source_modified_at=?
+                    ORDER BY retrieved_at DESC LIMIT 1""",
+                    (release.year, release.modified_at)).fetchone()
+                if current is not None:
+                    db.execute("""UPDATE sdud_snapshots SET last_seen_at=?
+                        WHERE content_hash=?""",
+                        (datetime.now(timezone.utc).isoformat(), current["content_hash"]))
+            if current is None:
+                normalized = normalize(fetch_rows(release), source_year=release.year)
+                latest_quarter = max(row[1] for row in normalized)
+                digest = hashlib.sha256(json.dumps(normalized, separators=(",", ":"),
+                                                 ensure_ascii=False).encode()).hexdigest()
+                suppressed = sum(row[6] for row in normalized)
+                reported = sum(row[5] or 0 for row in normalized)
+                retrieved = datetime.now(timezone.utc).isoformat()
+                with connect() as db:
+                    exists = db.execute("SELECT 1 FROM sdud_snapshots WHERE content_hash=?",
+                                        (digest,)).fetchone()
+                    if not exists:
+                        db.execute("""INSERT INTO sdud_snapshots
+                            (content_hash, source_year, latest_quarter, retrieved_at,
+                             last_seen_at, source_modified_at, source_url, row_count,
+                             suppressed_rows, reported_prescriptions)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                            (digest, release.year, latest_quarter, retrieved, retrieved,
+                             release.modified_at, release.source_url, len(normalized),
+                             suppressed, reported))
+                        db.executemany("""INSERT INTO sdud_rows
+                            (content_hash, year, quarter, utilization_type, ndc,
+                             product_name, prescriptions, suppressed)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                            [(digest, *row) for row in normalized])
+                        written += len(normalized)
+                    else:
+                        db.execute("""UPDATE sdud_snapshots SET last_seen_at=?,
+                            source_modified_at=? WHERE content_hash=?""",
+                            (retrieved, release.modified_at, digest))
+            checked_years.append(release.year)
+        latest = releases[-1]
         with connect() as db:
-            exists = db.execute("SELECT 1 FROM sdud_snapshots WHERE content_hash=?",
-                                (digest,)).fetchone()
-            written = 0
-            if not exists:
-                db.execute("""INSERT INTO sdud_snapshots
-                    (content_hash, source_year, latest_quarter, retrieved_at, last_seen_at,
-                     source_modified_at, source_url,
-                     row_count, suppressed_rows, reported_prescriptions)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (digest, release.year, latest_quarter, retrieved, retrieved,
-                     release.modified_at, release.source_url,
-                     len(normalized), suppressed, reported))
-                db.executemany("""INSERT INTO sdud_rows
-                    (content_hash, year, quarter, utilization_type, ndc,
-                     product_name, prescriptions, suppressed)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                    [(digest, *row) for row in normalized])
-                written = len(normalized)
-            else:
-                db.execute("""UPDATE sdud_snapshots SET last_seen_at=?,
-                    source_modified_at=? WHERE content_hash=?""",
-                    (retrieved, release.modified_at, digest))
+            latest_row = db.execute("""SELECT latest_quarter, row_count,
+                suppressed_rows, reported_prescriptions FROM sdud_snapshots
+                WHERE source_year=? AND source_modified_at=?
+                ORDER BY retrieved_at DESC LIMIT 1""",
+                (latest.year, latest.modified_at)).fetchone()
+            finished = datetime.now(timezone.utc).isoformat()
             db.execute("""UPDATE refresh_runs SET finished_at=?, status='success',
-                rows_written=? WHERE id=?""", (retrieved, written, run_id))
-        return {"source": SOURCE_KIND, "source_year": release.year,
-                "source_url": release.source_url,
-                "source_modified_at": release.modified_at,
-                "latest_quarter": latest_quarter,
-                "rows": len(normalized), "suppressed_rows": suppressed,
-                "reported_prescriptions": reported, "rows_written": written,
-                "finished_at": retrieved}
+                rows_written=? WHERE id=?""", (finished, written, run_id))
+        return {"source": SOURCE_KIND, "source_year": latest.year,
+                "source_url": latest.source_url,
+                "source_modified_at": latest.modified_at,
+                "latest_quarter": latest_row["latest_quarter"],
+                "rows": latest_row["row_count"],
+                "suppressed_rows": latest_row["suppressed_rows"],
+                "reported_prescriptions": latest_row["reported_prescriptions"],
+                "archived_years": checked_years, "rows_written": written,
+                "finished_at": finished}
     except Exception as exc:
         with connect() as db:
             db.execute("""UPDATE refresh_runs SET finished_at=?, status='failed', error=?

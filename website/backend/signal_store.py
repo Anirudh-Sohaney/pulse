@@ -1320,7 +1320,8 @@ def latest_sdud_snapshot(*, search: str = "", limit: int = 100,
     initialize()
     with connect() as db:
         snapshot = db.execute("""SELECT * FROM sdud_snapshots
-            ORDER BY last_seen_at DESC LIMIT 1""").fetchone()
+            ORDER BY source_year DESC, latest_quarter DESC, last_seen_at DESC
+            LIMIT 1""").fetchone()
         if snapshot is None:
             return {"period": None, "products": [], "count": 0,
                     "note": "No Arkansas SDUD snapshot has been recorded."}

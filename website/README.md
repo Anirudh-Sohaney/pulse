@@ -18,6 +18,12 @@ and source-specific routes. The seed manifest is an archive of identities, not
 the current publication list. The source worker checks FDA news and shortages,
 FRED-hosted BLS series, Medicaid, CMS, FluView, NNDSS, and wastewater feeds. Source adapters and
 evaluated newer-drug outputs can add stable IDs beyond the seed catalog.
+The Medicaid SDUD adapter retains the official annual releases from 2023 onward
+as separate, dated snapshots. It checks catalog modification times before
+downloading unchanged years. Suppressed prescription counts stay unknown;
+the latest-source route remains on the newest year and quarter even when an
+older release is revised. This archive is source evidence for future quarterly
+evaluation, not a published quarterly drug forecast.
 
 `/api/v1/signals/demand/horizon-study` serves the held-out 1/7/14/30-day
 synthetic pharmacy comparison from `../model/trained/synthetic_horizon_xgb_v1/`.
