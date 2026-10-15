@@ -32,6 +32,30 @@ The purged historical recipe closely reproduces the earlier synthetic result of 
 
 ## Work completed
 
+- On 2026-10-15, exported the retained public Arkansas SDUD releases (2023–2026)
+  from the live source store through `website/backend/export_sdud_model_csv.py`.
+  The export contains only source rows and records each release hash and source
+  timestamp in a separate manifest; it contains no account data. Corrected the
+  model's CSV adapter to use the historical lowercase product-name identity and
+  to replace, rather than sum, a revised drug-quarter. The resulting panel has
+  56,053 drug-quarter rows, including 1,072 drug names shared with 2012–2022
+  history and 867 drugs spanning the 2022-Q4/2023-Q1 boundary. The 2023–2026
+  release hashes start `01a6f7684387`, `909f177ee058`, `0181c5f6fa40`, and
+  `62677ced06c4` respectively.
+- The strict quarterly evaluation on that merged panel selected a pointwise
+  model with 9.16% test WAPE; the best model by test score reached 8.58%, but
+  that diagnostic result did not determine selection. The strongest naive
+  WAPE was 11.06%. In the
+  one-year rolling evaluation, all nine folds beat their strongest naive
+  baseline, five cleared the 10% improvement gate, and mean improvement was
+  15.8%. Mean selected three-state accuracy was 67.6% (40.2% balanced), below
+  the project's 75% promotion goal. The 2025 test fold selected a model with
+  5.23% WAPE against 7.34% for its strongest naive baseline. These scores
+  remain research evidence: source vintages before the 2026 archive capture
+  were not retained, suppressed counts remain unknown, and the latest source
+  period is 2026-Q1, so a next-quarter forecast would target the already-past
+  2026-Q2. No quarterly forecast was promoted.
+
 - On 2026-10-15, the Oracle source worker retained official Arkansas Medicaid
   SDUD releases for 2023-Q1 through 2025-Q4 and 2026-Q1, adding 272,904
   NDC/utilization rows beyond the previously stored 2026 snapshot. The public

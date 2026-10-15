@@ -374,6 +374,23 @@ PYTHONPATH=model python -m arkansas_pharma_signal.cli --root . validate-external
 
 The CLI also includes commands for weather refresh/history, county outcomes, event annotation/gold benchmarks, supplier shortage evaluation, ARCOS evaluation, and target-specific utility experiments. These are research and data-build tools; run the command’s help and consult its matching docs before interpreting its outputs.
 
+To evaluate the retained public Arkansas SDUD releases from the Oracle source
+store, export only those source rows and keep the hash manifest beside them:
+
+```bash
+ssh dev_server 'docker exec website-worker-1 python -m backend.export_sdud_model_csv' \
+  > /tmp/pulse-sdud-archive.csv 2> /tmp/pulse-sdud-archive-manifest.json
+PYTHONPATH=model website/.venv/bin/python -m arkansas_pharma_signal.cli \
+  --root . evaluate-quarterly \
+  --live-sdud-url file:///tmp/pulse-sdud-archive.csv \
+  --rolling --rolling-test-window-years 1
+```
+
+This supplies current *target history* to the research evaluator; it does not
+make a current forecast when the latest published quarter is already past.
+The CSV adapter excludes suppressed counts and replaces any overlapping
+drug-quarter in the old panel instead of adding a revised count to it.
+
 ### Separate news-only model integration
 
 The archived 20-signal FLAN-T5-small output is a dated feature bridge, not an inference pipeline. The adapter validates and materializes it for downstream training; it does not directly forecast pharmacy availability. A separately trained TF-IDF/Ridge article-to-20 model and API shadow runner are documented in `docs/NEWS_ONLY_INTEGRATION.md`. If the historical bridge changes, rebuild the bridge and panel and retrain models so the saved feature contract matches:
