@@ -87,7 +87,10 @@ def check_services(*, state_dir: Path = STATE, runner: Runner = run) -> None:
 
 def main() -> int:
     try:
-        with LOCK.open("w") as lock:
+        # The updater creates this Ubuntu-owned file in the sticky /run/lock
+        # directory. Open its existing inode without O_CREAT/O_TRUNC so Linux
+        # protected_regular does not reject the root watchdog process.
+        with LOCK.open("rb") as lock:
             try:
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError:

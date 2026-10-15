@@ -1,5 +1,6 @@
 """The Oracle watchdog repairs sustained failures and respects startup grace."""
 
+import fcntl
 from subprocess import CompletedProcess
 
 from deploy.oracle import watchdog
@@ -54,3 +55,17 @@ def test_success_clears_failure_and_proxy_only_restarts_with_healthy_upstreams(t
     watchdog.check_services(state_dir=tmp_path, runner=commands)
     assert [call[-1] for call in commands.calls if call[:2] == ["systemctl", "restart"]] == [
         "nginx"]
+
+
+def test_main_uses_existing_updater_lock_and_skips_active_deploy(tmp_path, monkeypatch):
+    lock = tmp_path / "updater.lock"
+    lock.write_bytes(b"")
+    monkeypatch.setattr(watchdog, "LOCK", lock)
+    checks = []
+    monkeypatch.setattr(watchdog, "check_services", lambda: checks.append(True))
+    assert watchdog.main() == 0
+    assert checks == [True]
+    with lock.open("rb") as held:
+        fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        assert watchdog.main() == 0
+    assert checks == [True]
