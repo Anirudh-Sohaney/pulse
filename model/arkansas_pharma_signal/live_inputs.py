@@ -319,7 +319,10 @@ def fetch_medicaid_sdud_csv(*, url: str = MEDICAID_SDUD_2025_URL,
         frame = pd.DataFrame(columns=["year", "quarter", "drug", "value", "ndc"])
     else:
         raw = pd.concat(rows, ignore_index=True)
-        raw["drug"] = raw["Product FDA List Name"].fillna("").astype(str).str.strip()
+        # The historical SDUD panel stores the source's truncated product name
+        # in lowercase. Preserve that identity across release refreshes.
+        raw["drug"] = (raw["Product FDA List Name"].fillna("").astype(str)
+                       .str.strip().str.lower())
         raw = raw[raw["drug"].ne("")]
         frame = (raw.groupby(["Year", "Quarter", "drug"], as_index=False)
                  .agg(value=("value", "sum"), ndc=("NDC", "first"))

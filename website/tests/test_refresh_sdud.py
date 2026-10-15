@@ -1,11 +1,14 @@
 """The live SDUD archive keeps a continuous target history across releases."""
 
 from datetime import datetime, timezone
+from io import StringIO
+import csv
+import json
 
 import pytest
 from fastapi.testclient import TestClient
 
-from backend import refresh_sdud, signal_store
+from backend import export_sdud_model_csv, refresh_sdud, signal_store
 from backend.app import create_app
 from backend.config import settings
 
@@ -58,6 +61,16 @@ def test_refresh_archives_unchanged_years_and_keeps_newest_period(tmp_path, monk
     response = TestClient(create_app()).get("/api/v1/signals/sources/sdud/archive")
     assert response.status_code == 200
     assert response.json()["newest_period"] == "2025-Q4"
+
+    exported, manifest = StringIO(), StringIO()
+    export_sdud_model_csv.export(exported, manifest)
+    public_rows = list(csv.DictReader(StringIO(exported.getvalue())))
+    assert len(public_rows) == 6
+    assert public_rows[0]["State Code"] == "AR"
+    assert public_rows[0]["No. of Prescriptions"] == "12"
+    assert public_rows[1]["No. of Prescriptions"] == ""
+    assert [row["year"] for row in json.loads(manifest.getvalue())["releases"]] == [
+        2023, 2024, 2025]
 
     second = refresh_sdud.refresh_sdud()
     assert second["rows_written"] == 0

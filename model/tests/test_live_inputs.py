@@ -358,13 +358,13 @@ def test_medicaid_sdud_adapter_filters_state_and_suppression(monkeypatch):
     monkeypatch.setattr(live_inputs, "urlopen", fake_urlopen)
     frame, metadata = live_inputs.fetch_medicaid_sdud_csv(url="https://example.test/sdud.csv")
     assert frame[["year", "quarter", "drug", "value"]].to_dict("records") == [
-        {"year": 2025, "quarter": 1, "drug": "DRUG A", "value": 12.0}
+        {"year": 2025, "quarter": 1, "drug": "drug a", "value": 12.0}
     ]
     assert metadata["suppressed_rows_excluded"] is True
     assert metadata["state"] == "AR"
 
 
-def test_multi_year_sdud_refresh_aggregates_and_preserves_sources(monkeypatch):
+def test_multi_year_sdud_refresh_replaces_overlap_and_preserves_sources(monkeypatch):
     def fake_fetch(*, url):
         year = 2023 if "2023" in url else 2024
         frame = pd.DataFrame([{
@@ -383,7 +383,7 @@ def test_multi_year_sdud_refresh_aggregates_and_preserves_sources(monkeypatch):
     frame, metadata = _merge_live_sdud_target(
         base, ["https://example.test/sdud2023.csv",
                "https://example.test/sdud2024.csv"])
-    assert frame.loc[(frame["year"] == 2023) & (frame["quarter"] == 1), "value"].iloc[0] == 15.0
+    assert frame.loc[(frame["year"] == 2023) & (frame["quarter"] == 1), "value"].iloc[0] == 10.0
     assert frame.loc[frame["year"] == 2024, "value"].iloc[0] == 10.0
     assert metadata["source_urls"] == [
         "https://example.test/sdud2023.csv",
@@ -393,3 +393,17 @@ def test_multi_year_sdud_refresh_aggregates_and_preserves_sources(monkeypatch):
     assert metadata["panel_period_end_date"] == "2024-03-31"
     assert metadata["panel_age_days"] >= 0
     assert metadata["next_forecast_period"] == "2024-Q2"
+
+
+def test_multi_year_sdud_refresh_rejects_duplicate_release_keys(monkeypatch):
+    def fake_fetch(*, url):
+        frame = pd.DataFrame([{
+            "year": 2024, "quarter": 1, "drug": "drug a", "value": 10.0,
+            "ingredient": "drug a", "ndc": "001", "rxnorm_rxcui": "",
+            "manufacturer": "", "mapping_confidence": "test",
+        }])
+        return frame, {"source_url": url, "retrieved_on": "2026-08-15", "rows": 1}
+
+    monkeypatch.setattr("arkansas_pharma_signal.cli.fetch_medicaid_sdud_csv", fake_fetch)
+    with pytest.raises(ValueError, match="double-count"):
+        _merge_live_sdud_target(pd.DataFrame(), ["first.csv", "second.csv"])

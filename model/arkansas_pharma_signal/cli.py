@@ -1043,14 +1043,16 @@ def _merge_live_sdud_target(
     if not frames:
         return panel, {"source": "CMS State Drug Utilization Data",
                        "sources": source_metadata, "rows": 0}
-    combined = pd.concat([panel, *frames], ignore_index=True)
-    combined = (combined.groupby(["year", "quarter", "drug"], as_index=False)
-                .agg(value=("value", "sum"),
-                     ingredient=("ingredient", "first"),
-                     ndc=("ndc", "first"),
-                     rxnorm_rxcui=("rxnorm_rxcui", "first"),
-                     manufacturer=("manufacturer", "first"),
-                     mapping_confidence=("mapping_confidence", "first")))
+    refreshed = pd.concat(frames, ignore_index=True)
+    identity = ["year", "quarter", "drug"]
+    if refreshed.duplicated(identity).any():
+        raise ValueError("overlapping live SDUD releases would double-count a drug-quarter")
+    # A current release revises the historical target for the same key. It
+    # must replace that key, never add its prescriptions to the older value.
+    old_keys = pd.MultiIndex.from_frame(panel[identity])
+    new_keys = pd.MultiIndex.from_frame(refreshed[identity])
+    combined = pd.concat([panel.loc[~old_keys.isin(new_keys)], refreshed],
+                         ignore_index=True)
     q_id = ((pd.to_numeric(combined["year"], errors="coerce") - 2012) * 4
             + pd.to_numeric(combined["quarter"], errors="coerce") - 1)
     latest = combined.loc[q_id.idxmax()]
